@@ -53,9 +53,12 @@ export class ExtDatasetClient<T extends DatasetItem> extends DatasetClient<T> im
         this.context.logger.info('Finished reading dataset', { totalItems }, { url: this.url });
     }
 
-    async *greedyIterate(options: GreedyIterateOptions = {}): AsyncGenerator<T, void, void> {
+    /**
+     * Polls the associated run and yields pages of newly available items until the run reaches a
+     * terminal status, then drains any remaining pages.
+     */
+    private async *greedyFetchBatches(options: GreedyIterateOptions = {}): AsyncGenerator<T[], void, void> {
         const { pageSize = 100, pollIntervalSecs = 10, ...listItemOptions } = options;
-        this.context.logger.info('Greedily iterating Dataset', { pageSize }, { url: this.url });
 
         let readItemsCount = 0;
 
@@ -79,9 +82,7 @@ export class ExtDatasetClient<T extends DatasetItem> extends DatasetClient<T> im
                 limit: pageSize,
             });
             readItemsCount += itemList.count;
-            for (const item of itemList.items) {
-                yield item;
-            }
+            yield itemList.items;
 
             const isTerminal = (ACTOR_JOB_TERMINAL_STATUSES as readonly string[]).includes(run.status);
             if (isTerminal) {
@@ -105,8 +106,28 @@ export class ExtDatasetClient<T extends DatasetItem> extends DatasetClient<T> im
                 break;
             }
             readItemsCount += itemList.count;
-            for (const item of itemList.items) {
+            yield itemList.items;
+        }
+    }
+
+    async *greedyIterate(options: GreedyIterateOptions = {}): AsyncGenerator<T, void, void> {
+        const { pageSize = 100 } = options;
+        this.context.logger.info('Greedily iterating Dataset', { pageSize }, { url: this.url });
+
+        for await (const batch of this.greedyFetchBatches(options)) {
+            for (const item of batch) {
                 yield item;
+            }
+        }
+    }
+
+    async *greedyIterateBatched(options: GreedyIterateOptions = {}): AsyncGenerator<T[], void, void> {
+        const { pageSize = 100 } = options;
+        this.context.logger.info('Greedily iterating Dataset in batches', { pageSize }, { url: this.url });
+
+        for await (const batch of this.greedyFetchBatches(options)) {
+            if (batch.length > 0) {
+                yield batch;
             }
         }
     }
