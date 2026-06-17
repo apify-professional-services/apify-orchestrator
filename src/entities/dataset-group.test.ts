@@ -64,4 +64,57 @@ describe('DatasetGroupClass', () => {
 
         expect(readItems).toEqual([{ title: 'A' }, { title: 'B' }, { title: 'C' }]);
     });
+
+    it('can iterate over batches from all the datasets, in order', async () => {
+        interface Item extends DatasetItem {
+            title: string;
+        }
+        const dataset1: PaginatedList<Item> = {
+            count: 2,
+            desc: true,
+            items: [{ title: 'A1' }, { title: 'A2' }],
+            limit: 0,
+            offset: 0,
+            total: 2,
+        };
+        const dataset2: PaginatedList<Item> = {
+            count: 2,
+            desc: true,
+            items: [{ title: 'B1' }, { title: 'B2' }],
+            limit: 0,
+            offset: 0,
+            total: 2,
+        };
+        const dataset3: PaginatedList<Item> = {
+            count: 2,
+            desc: true,
+            items: [{ title: 'C1' }, { title: 'C2' }],
+            limit: 0,
+            offset: 0,
+            total: 2,
+        };
+
+        vi.spyOn(DatasetClient.prototype, 'listItems')
+            .mockResolvedValueOnce(dataset1)
+            .mockResolvedValueOnce(dataset2)
+            .mockResolvedValueOnce(dataset3);
+
+        const mergedDatasets = orchestrator.mergeDatasets(
+            client.dataset<Item>('test-id1'),
+            client.dataset<Item>('test-id2'),
+            client.dataset<Item>('test-id3'),
+        );
+
+        const datasetIterator = mergedDatasets.iterateBatched({});
+        const readBatches: Item[][] = [];
+        for await (const batch of datasetIterator) {
+            readBatches.push(batch);
+        }
+
+        expect(readBatches).toEqual([
+            [{ title: 'A1' }, { title: 'A2' }],
+            [{ title: 'B1' }, { title: 'B2' }],
+            [{ title: 'C1' }, { title: 'C2' }],
+        ]);
+    });
 });

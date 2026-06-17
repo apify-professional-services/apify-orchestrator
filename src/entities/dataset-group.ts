@@ -15,4 +15,13 @@ export class DatasetGroupClass<T extends DatasetItem> implements DatasetGroup<T>
             }
         }
     }
+
+    async *iterateBatched(options: IterateOptions): AsyncGenerator<T[], void, void> {
+        for (const dataset of this.datasets) {
+            const datasetIterator = dataset.iterateBatched(options);
+            for await (const batch of datasetIterator) {
+                yield batch;
+            }
+        }
+    }
 }

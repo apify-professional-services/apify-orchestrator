@@ -420,6 +420,21 @@ export interface ExtendedDatasetClient<T extends DatasetItem> extends DatasetCli
     iterate: (options: IterateOptions) => AsyncGenerator<T, void, void>;
 
     /**
+     * Iterates over the items in the dataset in batches.
+     * Batches have the same size as the `pageSize` options, or the size of the dataset if `pageSize` is not specified.
+     *
+     * @param options  includes all the options in `DatasetClientListItemOptions` and `pageSize`
+     * @returns an `AsyncGenerator` which iterates the items in the dataset, in batches
+     *
+     * @example
+     * const batchedDatasetIterator = datasetClient.iterateBatched({ pageSize: 100 });
+     * for await (const batch of batchedDatasetIterator) {
+     *     await Actor.pushData(batch.map(adaptItemToOutputFormat));
+     * }
+     */
+    iterateBatched: (options: IterateOptions) => AsyncGenerator<T[], void, void>;
+
+    /**
      * Iterates over the items in the dataset as they become available, polling the run status
      * at a regular interval and yielding any new items found at each poll.
      *
@@ -459,6 +474,18 @@ export interface DatasetGroup<T extends DatasetItem> {
      * @returns an `AsyncGenerator` which iterates the items in the datasets
      */
     iterate: (options: IterateOptions) => AsyncGenerator<T, void, void>;
+
+    /**
+     * Iterate over all the items from all the dataset, in order, at one time, in batches.
+     * Batches have at most the same size as the `pageSize`, the size of the remaining items of the current `dataset`,
+     * or the size of each dataset if `pageSize` is not specified.
+     *
+     * The option `pageSize` will help avoiding the JavaScript's string limit when deserializing the content.
+     *
+     * @param options includes all the options in `DatasetClientListItemOptions` and `pageSize`
+     * @returns an `AsyncGenerator` which iterates the items in the datasets, in batches
+     */
+    iterateBatched: (options: IterateOptions) => AsyncGenerator<T[], void, void>;
 }
 
 /**

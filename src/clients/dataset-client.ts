@@ -24,33 +24,54 @@ export class ExtDatasetClient<T extends DatasetItem> extends DatasetClient<T> im
         this.context = context;
     }
 
-    async *iterate(options: IterateOptions = {}): AsyncGenerator<T, void, void> {
+    private async *fetchBatches(options: IterateOptions = {}): AsyncGenerator<T[], void, void> {
         const { pageSize, ...listItemOptions } = options;
-        this.context.logger.info('Iterating Dataset', { pageSize }, { url: this.url });
-
-        let totalItems = 0;
 
         if (pageSize) {
             let offset = 0;
             let currentPage = await super.listItems({ ...listItemOptions, offset, limit: pageSize });
             while (currentPage.items.length > 0) {
-                totalItems += currentPage.items.length;
-                for (const item of currentPage.items) {
-                    yield item;
-                }
+                yield currentPage.items;
 
                 offset += pageSize;
                 currentPage = await super.listItems({ offset, limit: pageSize });
             }
         } else {
             const itemList = await super.listItems(listItemOptions);
-            totalItems += itemList.items.length;
-            for (const item of itemList.items) {
+            yield itemList.items;
+        }
+    }
+
+    async *iterate(options: IterateOptions = {}): AsyncGenerator<T, void, void> {
+        const { pageSize } = options;
+        this.context.logger.info('Iterating Dataset', { pageSize }, { url: this.url });
+
+        let totalItems = 0;
+
+        for await (const batch of this.fetchBatches(options)) {
+            totalItems += batch.length;
+            for (const item of batch) {
                 yield item;
             }
         }
 
         this.context.logger.info('Finished reading dataset', { totalItems }, { url: this.url });
+    }
+
+    async *iterateBatched(options: IterateOptions = {}): AsyncGenerator<T[], void, void> {
+        const { pageSize } = options;
+        this.context.logger.info('Iterating Dataset in batches', { pageSize }, { url: this.url });
+
+        let totalItems = 0;
+
+        for await (const batch of this.fetchBatches(options)) {
+            totalItems += batch.length;
+            if (batch.length > 0) {
+                yield batch;
+            }
+        }
+
+        this.context.logger.info('Finished reading dataset in batches', { totalItems }, { url: this.url });
     }
 
     /**
