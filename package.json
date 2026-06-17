@@ -72,5 +72,15 @@
         "words": [],
         "ignoreWords": [],
         "import": []
+    },
+    "lint-staged": {
+        "*.{js,ts,mjs}": [
+            "eslint",
+            "prettier --check",
+            "vitest related --run --config vitest.unit.config.ts"
+        ],
+        "*.{json,md,yml,yaml}": [
+            "prettier --check"
+        ]
     }
 }
