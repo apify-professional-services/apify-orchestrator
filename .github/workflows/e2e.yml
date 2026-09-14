@@ -3,6 +3,10 @@ name: E2E Tests
 on:
     pull_request:
 
+permissions:
+    # Recommended: sets the permissions given to the GITHUB_TOKEN for this workflow
+    contents: read
+
 jobs:
     e2e:
         runs-on: ubuntu-latest
@@ -10,6 +14,10 @@ jobs:
         steps:
             - name: Checkout code
               uses: actions/checkout@v7
+              with:
+                  # By default, actions/checkout writes the GITHUB_TOKEN into the local .git/config
+                  # We don't need to perform any Git operation, so we disable persisting credentials
+                  persist-credentials: false
 
             - name: Setup Node.js
               uses: actions/setup-node@v7
