@@ -37,7 +37,7 @@ const actorTemplate = 'ts_empty';
 console.log(`\nCreating actor: ${actorName}. Using template: ${actorTemplate}\n`);
 
 try {
-    execSync(`apify create "${actorName}" --template "${actorTemplate}" --skip-dependency-install`, {
+    execSync(`apify create "${actorName}" --template "${actorTemplate}" --skip-dependency-install --source apify`, {
         stdio: 'inherit',
     });
 } catch {
@@ -52,7 +52,10 @@ if (existsSync(actorSrcPath)) {
     rmSync(actorSrcPath, { recursive: true, force: true });
 }
 
-cpSync('src', actorSrcPath, { recursive: true });
+cpSync('src', actorSrcPath, {
+    recursive: true,
+    filter: (source) => !source.endsWith('.test.ts') && !source.endsWith('.bench.ts'),
+});
 renameSync(`${actorSrcPath}/e2e-test.ts`, `${actorSrcPath}/main.ts`);
 
 console.log('\nInstalling dependencies.\n');
