@@ -446,6 +446,7 @@ export interface ExtendedDatasetClient<T extends DatasetItem> extends DatasetCli
      *
      * The option `chunkSize` will help avoiding the JavaScript's string limit when deserializing the content.
      * The default value is 100 items.
+     * You can set it to 0 to disable pagination and fetch all available items in a single call.
      *
      * The option `pollIntervalSecs` allows customizing how frequently to call the API to check for new items.
      * The default value is 10 seconds.
@@ -559,7 +560,9 @@ export type ListItemsBatchedOptions = DatasetClientListSortedItemOptions & {
      * The number of items in each yielded batch: every batch will have this exact size,
      * except the last one, which may be smaller.
      *
-     * @default the value of `chunkSize`, if greater than zero, or 100
+     * It must be a positive integer greater than zero.
+     *
+     * @default the value of `chunkSize`, if specified, or 100
      */
     batchSize?: number;
 };

@@ -111,9 +111,9 @@ describe('ExtDatasetClient', () => {
             }
 
             expect(items).toEqual([{ title: 'available' }, { title: 'new' }]);
-            expect(listItemsSpy).toHaveBeenNthCalledWith(1, expect.objectContaining({ offset: 0, limit: 0 }));
-            expect(listItemsSpy).toHaveBeenNthCalledWith(2, expect.objectContaining({ offset: 1, limit: 0 }));
-            expect(listItemsSpy).toHaveBeenNthCalledWith(3, expect.objectContaining({ offset: 2, limit: 0 }));
+            expect(listItemsSpy).toHaveBeenNthCalledWith(1, expect.objectContaining({ offset: 0, limit: undefined }));
+            expect(listItemsSpy).toHaveBeenNthCalledWith(2, expect.objectContaining({ offset: 1, limit: undefined }));
+            expect(listItemsSpy).toHaveBeenNthCalledWith(3, expect.objectContaining({ offset: 2, limit: undefined }));
         });
 
         it('respects the initial offset', async () => {
@@ -266,12 +266,12 @@ describe('ExtDatasetClient', () => {
             expect(batches).toEqual([]);
         });
 
-        it('falls back to the default batch size when the chunk size is zero', async () => {
+        it('falls back to the default batch size when the chunk size is undefined', async () => {
             const items = Array.from({ length: 101 }, (_, index) => ({ title: `item-${index}` }));
             vi.spyOn(DatasetClient.prototype, 'listItems').mockReturnValue(mockListItemsResult(items) as never);
 
             const batches: TestItem[][] = [];
-            for await (const batch of datasetClient.listItemsBatched({ chunkSize: 0 })) {
+            for await (const batch of datasetClient.listItemsBatched({ chunkSize: undefined })) {
                 batches.push(batch);
             }
 
@@ -281,6 +281,19 @@ describe('ExtDatasetClient', () => {
         it('throws if the batch size is not a positive integer', async () => {
             const iterator = datasetClient.listItemsBatched({ batchSize: 0 });
             await expect(iterator.next()).rejects.toThrow('The batch size must be a positive integer.');
+        });
+
+        it('treats batchSize the same way as chunkSize', async () => {
+            // An explicit, invalid batchSize is rejected by our own validation.
+            const negativeBatchSize = datasetClient.listItemsBatched({ batchSize: -1 });
+            await expect(negativeBatchSize.next()).rejects.toThrow('The batch size must be a positive integer.');
+
+            // We compute the batch size falling back to the default value,
+            // but `listItems` still rejects a chunkSize of 0.
+            const zeroChunkSize = datasetClient.listItemsBatched({ chunkSize: 0 });
+            await expect(zeroChunkSize.next()).rejects.toThrow('chunkSize');
+
+            await expect(async () => datasetClient.listItems({ chunkSize: 0 })).rejects.toThrow('chunkSize');
         });
     });
 
@@ -385,6 +398,28 @@ describe('ExtDatasetClient', () => {
 
         it('throws if the batch size is not a positive integer', async () => {
             const iterator = datasetClient.greedyListItemsBatched({ batchSize: -1 });
+            await expect(iterator.next()).rejects.toThrow('The batch size must be a positive integer.');
+        });
+
+        it('falls back to the default batch size when the chunk size is 0, unlike listItemsBatched', async () => {
+            vi.spyOn(DatasetClient.prototype, 'get').mockResolvedValue({ actRunId: 'test-run-id' } as never);
+            vi.spyOn(RunClient.prototype, 'get').mockResolvedValue(createActorRunMock({ status: 'SUCCEEDED' }));
+
+            const items = Array.from({ length: 101 }, (_, index) => ({ title: `item-${index}` }));
+            vi.spyOn(DatasetClient.prototype, 'listItems')
+                .mockResolvedValueOnce({ items, count: 101, total: 101, offset: 0, limit: 101, desc: false })
+                .mockResolvedValueOnce({ items: [], count: 0, total: 101, offset: 101, limit: 0, desc: false });
+
+            const batches: TestItem[][] = [];
+            for await (const batch of datasetClient.greedyListItemsBatched({ chunkSize: 0, pollIntervalSecs: 0 })) {
+                batches.push(batch);
+            }
+
+            expect(batches.map((batch) => batch.length)).toEqual([100, 1]);
+        });
+
+        it('treats an explicit negative chunkSize the same way as a negative batchSize', async () => {
+            const iterator = datasetClient.greedyListItemsBatched({ chunkSize: -1 });
             await expect(iterator.next()).rejects.toThrow('The batch size must be a positive integer.');
         });
     });

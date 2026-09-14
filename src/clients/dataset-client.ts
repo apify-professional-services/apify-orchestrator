@@ -13,8 +13,10 @@ import { isRunTerminalStatus } from '../utils/apify-client.js';
 import { iterateBatches } from '../utils/iterators.js';
 import { isDefined } from '../utils/typing.js';
 
-const DEFAULT_CHUNK_SIZE = 100;
-const DEFAULT_POLL_INTERVAL_SECS = 10;
+const GREEDY_DEFAULT_OPTIONS = {
+    CHUNK_SIZE: 100,
+    POLL_INTERVAL_SECS: 10,
+} as const;
 
 export class ExtDatasetClient<T extends DatasetItem> extends DatasetClient<T> implements ExtendedDatasetClient<T> {
     private readonly context: OrchestratorContext;
@@ -51,19 +53,19 @@ export class ExtDatasetClient<T extends DatasetItem> extends DatasetClient<T> im
     }
 
     private async listNextPage(options: DatasetClientListSortedItemOptions, readItemsCount: number) {
-        const { offset = 0, limit = 0, chunkSize = DEFAULT_CHUNK_SIZE } = options;
-        const pageSize = computeNextPageSize(limit, chunkSize, readItemsCount);
+        const { offset = 0, limit, chunkSize, ...otherOptions } = options;
+        const pageSize = computeNextPageSize(readItemsCount, limit, chunkSize);
         return super.listItems({
-            ...options,
+            ...otherOptions,
             offset: offset + readItemsCount,
             limit: pageSize,
         });
     }
 
-    async *greedyListItems(options: GreedyListItemsOptions = {}): AsyncGenerator<T, void, void> {
-        const { pollIntervalSecs = DEFAULT_POLL_INTERVAL_SECS, ...listOptions } = options;
-        const { limit = 0, chunkSize = DEFAULT_CHUNK_SIZE } = listOptions;
-        this.context.logger.info('Greedily iterating Dataset', { chunkSize }, { url: this.url });
+    async *greedyListItems(greedyOptions: GreedyListItemsOptions = {}): AsyncGenerator<T, void, void> {
+        const { pollIntervalSecs = GREEDY_DEFAULT_OPTIONS.POLL_INTERVAL_SECS, ...userListOptions } = greedyOptions;
+        const listOptions = { ...userListOptions, chunkSize: computeGreedyChunkSize(userListOptions.chunkSize) };
+        this.context.logger.info('Greedily iterating Dataset', { chunkSize: listOptions.chunkSize }, { url: this.url });
 
         let readItemsCount = 0;
         let isRunFinished = false;
@@ -82,7 +84,7 @@ export class ExtDatasetClient<T extends DatasetItem> extends DatasetClient<T> im
                 yield item;
             }
 
-            const isLimitReached = limit > 0 && readItemsCount >= limit;
+            const isLimitReached = isDefined(listOptions.limit) && readItemsCount >= listOptions.limit;
             const isDatasetExhausted = isRunFinished && itemList.count === 0;
             if (isDatasetExhausted || isLimitReached) break;
 
@@ -106,7 +108,8 @@ export class ExtDatasetClient<T extends DatasetItem> extends DatasetClient<T> im
 
     async *greedyListItemsBatched(options: GreedyListItemsBatchedOptions = {}): AsyncGenerator<T[], void, void> {
         const { batchSize, ...greedyOptions } = options;
-        const itemsPerBatch = computeBatchSize(batchSize, greedyOptions.chunkSize);
+        // Pass chunkSize as undefined if it is 0, since it's used to indicate no pagination.
+        const itemsPerBatch = computeBatchSize(batchSize, greedyOptions.chunkSize || undefined);
         this.context.logger.info(
             'Greedily iterating Dataset in batches',
             { batchSize: itemsPerBatch },
@@ -119,17 +122,30 @@ export class ExtDatasetClient<T extends DatasetItem> extends DatasetClient<T> im
     }
 }
 
-function computeNextPageSize(limit: number, chunkSize: number, readItemsCount: number): number {
+function computeGreedyChunkSize(chunkSize: number | undefined): number | undefined {
+    // apify-client treats chunkSize === undefined as no pagination.
+    // On the other hand, apify-client forbids chunkSize = 0.
+    // We set a default chunk size for greedy operations, so we allow setting chunkSize = 0 to indicate no pagination.
+    if (chunkSize === 0) return undefined;
+    return chunkSize ?? GREEDY_DEFAULT_OPTIONS.CHUNK_SIZE;
+}
+
+function computeNextPageSize(
+    readItemsCount: number,
+    limit: number | undefined,
+    chunkSize: number | undefined,
+): number | undefined {
+    if (!isDefined(limit) && !isDefined(chunkSize)) return undefined;
+    if (!isDefined(limit)) return chunkSize;
     if (limit > 0 && readItemsCount >= limit) throw new Error('Read items count has reached the limit.');
-    if (limit === 0) return chunkSize;
     const remainingCount = limit - readItemsCount;
-    if (chunkSize === 0) return remainingCount;
+    if (!isDefined(chunkSize)) return remainingCount;
     return Math.min(chunkSize, remainingCount);
 }
 
 function computeBatchSize(batchSize: number | undefined, chunkSize: number | undefined): number {
-    // A chunk size of 0 means no pagination, so it cannot be used as a batch size.
-    const size = batchSize ?? (chunkSize || DEFAULT_CHUNK_SIZE);
+    // We fallback to chunkSize only if it is greater than 0.
+    const size = batchSize ?? (chunkSize || GREEDY_DEFAULT_OPTIONS.CHUNK_SIZE);
     if (!Number.isInteger(size) || size <= 0) throw new Error('The batch size must be a positive integer.');
     return size;
 }
