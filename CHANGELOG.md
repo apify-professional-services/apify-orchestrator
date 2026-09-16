@@ -109,6 +109,29 @@
     const actorRun = await extendedApifyClient.actorRunByRequest('my-job');
     ```
 
+- When the Orchestrator aborts the Runs in progress because the Actor was gracefully aborted because
+  `abortAllRunsOnGracefulAbort` was set, the methods waiting for one of those Runs -
+  `ExtendedActorClient` and `ExtendedTaskClient`'s `call`, `callRuns`, and `callBatch`,
+  `ExtendedRunClient`'s `waitForFinish`, and `ExtendedApifyClient`'s `waitForBatchFinish` - no longer return
+  an `ABORTED` Run: they hang until the process is killed, at the end of the graceful abort timeout.
+  In this way, you no longer have to tell a Run aborted by the library from a Run aborted by a user.
+  To keep the previous behavior, enable the new `returnAbortedRunsOnGracefulAbort` option: those methods return the
+  aborted Runs again, this time flagged with `abortedOnGracefulAbort`.
+
+    ```ts
+    // Before: the call returned an ABORTED Run, indistinguishable from a Run aborted by a user.
+    const run = await client.actor(actorId).call(input, { runName: 'my-job' });
+    if (run.status === 'ABORTED') { await cleanUp(); }
+
+    // After: by default, the call never returns, and the code below is never executed.
+    const run = await client.actor(actorId).call(input, { runName: 'my-job' });
+
+    // After, with `returnAbortedRunsOnGracefulAbort: true`:
+    const run = await client.actor(actorId).call(input, { runName: 'my-job' });
+    if (run.abortedOnGracefulAbort) { await cleanUp(); } // aborted by the Orchestrator
+    else if (run.status === 'ABORTED') { ... }           // aborted by a user
+    ```
+
 - Increased the required Node.js version from 16 to 20.
   Specifically, `vitest` >= 4, used for testing, requires Node.js >= 20.
   Since the newly introduced GitHub Actions run the test suite against various Node.js versions,
@@ -159,6 +182,11 @@
 - New `ExtendedActorRun` type: an `ActorRun` extended with the `requestId` used to track the Run. It is returned by
   all the methods that start, call, or update Runs, e.g., `start`, `call`, `startRuns`, `callRuns`, `actorRunByRequest`,
   `ExtendedRunClient`'s methods such as `get`, `abort`, `reboot`, `update`, and `resurrect`, and the `onUpdate` callback.
+- New `returnAbortedRunsOnGracefulAbort` option (disabled by default): when enabled, the methods waiting for a Run
+  aborted by the Orchestrator on a graceful abort return it, instead of hanging until the process is killed.
+- New `abortedOnGracefulAbort` flag on the `ExtendedActorRun` objects: it is `true` if the Run was aborted by the
+  Orchestrator because the Actor was gracefully aborted, and `undefined` in any other case, including when the Run
+  was aborted by a user.
 - New `AmbiguousRunRequestError` (a subclass of `OrchestratorError`), thrown when the same
   auto-generated request ID is resolved twice in the same process with no resurrection in between - check the README for more insights.
 

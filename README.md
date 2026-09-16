@@ -38,7 +38,9 @@ Most of the following features are opt-in: you can use just the ones you need.
 - Store the Runs in progress in the Key Value Store and **resume** them after a resurrection, avoiding starting a new, redundant Run.
 
 - Abort all the Runs in progress, triggered by the orchestrator, when the latter is gracefully aborted _(opt-in)_.\
-  In this way, you have at your disposal a **kill switch** to stop all the Runs at once, for instance, to keep scraping costs under control.
+  In this way, you have at your disposal a **kill switch** to stop all the Runs at once, for instance, to keep scraping costs under control.\
+  The code waiting for those Runs hangs until the process is killed, so you never have to tell a Run aborted by the
+  library from a Run aborted by a user.
 
 - Avoid to incur in errors due to **too large strings**, e.g., due to JavaScript or Apify API limits.
 
@@ -115,7 +117,61 @@ The two codes are very similar, but there are already a few advantages to using 
 you can benefit from logs and regular reports, and the status of the Run is saved into the Key Value Store under the key
 `ORCHESTRATOR-MY-CLIENT-RUNS` with the name `my-job`, so if the Orchestrator times out, you can resurrect it, and it
 will wait for the same Run you started initially.
-Moreover, if you gracefully abort the orchestrator while the external Run is in progress, the latter will also be aborted.
+Moreover, if you gracefully abort the orchestrator while the external Run is in progress, the latter will also be
+aborted, and `call` will never return: see [the next section](#aborting-the-external-runs-on-graceful-abort).
+
+## Aborting the external Runs on graceful abort
+
+By default (`abortAllRunsOnGracefulAbort: true`), when your Actor is **gracefully aborted**, the Orchestrator aborts all
+the Runs it started and that are still in progress.
+
+The methods that are waiting for one of those Runs - `call`, `callRuns`, `callBatch`, `waitForFinish`, and
+`waitForBatchFinish` - **never return**: they hang until the Apify platform kills the process, at the end of the
+graceful abort timeout.
+
+This is intentional. If they returned the aborted Run, you would receive a regular `ABORTED` Run, and you would have to
+tell two very different situations apart in each and every place where you wait for a Run:
+
+1. the Run was aborted by the library, because your own Actor is shutting down;
+2. the Run was aborted by a user.
+
+Since your Actor is being shut down anyway, hanging makes sure that the code you would normally run after a successful
+Run - pushing results, computing statistics, starting other Runs - is not executed with an aborted Run:
+
+```js
+const orchestrator = new Orchestrator({ abortAllRunsOnGracefulAbort: true });
+const client = await orchestrator.apifyClient();
+
+// If the Actor is gracefully aborted while this Run is in progress, this line never returns,
+// and the code below is never executed.
+const run = await client.actor(actorId).call(actorInput, { runName: 'my-job' });
+await processResults(run);
+```
+
+If you need to perform some clean-up after your Runs have been aborted, you can enable
+`returnAbortedRunsOnGracefulAbort`: the same methods return the aborted Runs, which carry the additional flag
+`abortedOnGracefulAbort`, set to `true`, so you can still tell them apart from the Runs aborted by a user:
+
+```js
+const orchestrator = new Orchestrator({
+    abortAllRunsOnGracefulAbort: true,
+    returnAbortedRunsOnGracefulAbort: true,
+});
+const client = await orchestrator.apifyClient();
+
+const run = await client.actor(actorId).call(actorInput, { runName: 'my-job' });
+
+if (run.abortedOnGracefulAbort) {
+    // The Orchestrator aborted this Run because our Actor is being gracefully aborted.
+    await cleanUp();
+} else if (run.status === 'ABORTED') {
+    // A user aborted this Run.
+    log.warning('The Run was aborted by a user');
+}
+```
+
+If you disable `abortAllRunsOnGracefulAbort`, none of this applies: the external Runs keep going, and the methods
+waiting for them are killed abruptly, together with your Actor.
 
 ## Avoiding ambiguous Run requests
 

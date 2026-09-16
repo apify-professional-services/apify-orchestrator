@@ -52,6 +52,16 @@ export async function getOrchestratorTrackedValue(index: number): Promise<unknow
     return value;
 }
 
+/**
+ * Simulates a graceful abort of this Actor, by emitting the same event that the Apify platform emits,
+ * and waits for all the listeners, such as the Orchestrator's one, to complete.
+ */
+export async function simulateGracefulAbort(): Promise<void> {
+    const eventManager = Actor.config.getEventManager();
+    eventManager.emit('aborting');
+    await eventManager.waitForAllListenersToComplete();
+}
+
 export async function sleep(seconds: number): Promise<void> {
     return new Promise((resolve) => {
         setTimeout(resolve, seconds * 1000);

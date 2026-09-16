@@ -1,6 +1,7 @@
 import { log } from 'apify';
 
 import type { TrackedRuns } from '../run-tracker.js';
+import { childRunNeverReturnedOnGracefulAbort, childRunReturnedOnGracefulAbort } from './graceful-abort.js';
 import { checkResurrectionTestOutputCompleteness, runResurrectionTest } from './resurrection.js';
 import { TestTransientTaskRunner } from './transient-task-runner.js';
 import type { TestResult } from './types.js';
@@ -17,6 +18,10 @@ export async function runEndToEndTestSuite(): Promise<EndToEndTestOutput> {
         resurrectedRunWithoutPersistence,
         resurrectedRunWithPlainPersistence,
         resurrectedRunWithEncryptedPersistence,
+        // The graceful abort tests must run last: they emit the `aborting` event, which stops the schedulers
+        // of all the clients created so far, and makes them abort the Runs they are tracking.
+        childRunReturnedOnGracefulAbort,
+        childRunNeverReturnedOnGracefulAbort,
     ];
 
     const output: EndToEndTestOutput = {};

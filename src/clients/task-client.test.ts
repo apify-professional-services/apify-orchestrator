@@ -1,11 +1,13 @@
 import { ApifyClient, RunClient, TaskClient } from 'apify-client';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
+import { isStillPending } from '../__unit__/async.js';
 import { getClientContext } from '../__unit__/context.js';
 import { createActorRunMock } from '../__unit__/mocks.js';
 import type { ClientContext } from '../context/client-context.js';
 import type { RunSource } from '../entities/run-source.js';
 import { buildRunStartRequest } from '../entities/run-start-request.js';
+import type { OrchestratorOptions } from '../types.js';
 import { ExtApifyClient } from './apify-client.js';
 import { ExtRunClient } from './run-client.js';
 import type { ExtTaskClient } from './task-client.js';
@@ -26,8 +28,8 @@ describe('ExtTaskClient', () => {
         startedAt: new Date('2024-01-01T00:00:00.000Z'),
     });
 
-    beforeEach(() => {
-        context = getClientContext();
+    function setUpClients(overrideOptions?: Partial<OrchestratorOptions>) {
+        context = getClientContext(overrideOptions);
         apifyClient = new ExtApifyClient('test-client', context, {});
 
         vi.spyOn(apifyClient, 'findOrRequestRunStart').mockImplementation((request) => {
@@ -48,6 +50,10 @@ describe('ExtTaskClient', () => {
 
         // eslint-disable-next-line dot-notation
         runSource = taskClient['runSource'];
+    }
+
+    beforeEach(() => {
+        setUpClients();
     });
 
     afterEach(() => {
@@ -195,6 +201,37 @@ describe('ExtTaskClient', () => {
             await taskClient.call({ key: 'value1' }, { runName: 'test-run-1', waitSecs: 30 });
 
             expect(waitForFinishSpy).toHaveBeenCalledWith({ waitSecs: 30 });
+        });
+
+        it('never returns when the Run is aborted by the Orchestrator on graceful abort', async () => {
+            const abortedRunMock = createActorRunMock({ ...mockRun, requestId: 'test-run-1', status: 'ABORTED' });
+            vi.spyOn(RunClient.prototype, 'waitForFinish').mockResolvedValue(abortedRunMock);
+            context.gracefulAbortTracker.markRunsAborted(['mock-run-id']);
+
+            await expect(isStillPending(taskClient.call({ key: 'value1' }, { runName: 'test-run-1' }))).resolves.toBe(
+                true,
+            );
+        });
+
+        it('returns a flagged aborted Run if `returnAbortedRunsOnGracefulAbort` is enabled', async () => {
+            setUpClients({ returnAbortedRunsOnGracefulAbort: true });
+            const abortedRunMock = createActorRunMock({ ...mockRun, requestId: 'test-run-1', status: 'ABORTED' });
+            vi.spyOn(RunClient.prototype, 'waitForFinish').mockResolvedValue(abortedRunMock);
+            context.gracefulAbortTracker.markRunsAborted(['mock-run-id']);
+
+            const run = await taskClient.call({ key: 'value1' }, { runName: 'test-run-1' });
+
+            expect(run).toStrictEqual(expect.objectContaining({ status: 'ABORTED', abortedOnGracefulAbort: true }));
+        });
+
+        it('returns a Run aborted by a user', async () => {
+            const abortedRunMock = createActorRunMock({ ...mockRun, requestId: 'test-run-1', status: 'ABORTED' });
+            vi.spyOn(RunClient.prototype, 'waitForFinish').mockResolvedValue(abortedRunMock);
+
+            const run = await taskClient.call({ key: 'value1' }, { runName: 'test-run-1' });
+
+            expect(run.status).toBe('ABORTED');
+            expect(run.abortedOnGracefulAbort).toBeUndefined();
         });
     });
 

@@ -91,6 +91,11 @@ export class ExtActorClient extends ActorClient implements ExtendedActorClient {
     }
 
     /**
+     * If the Orchestrator aborts the Run because the Actor was gracefully aborted
+     * (see the `abortAllRunsOnGracefulAbort` option), this method does not return: it hangs until the process is
+     * killed, unless the `returnAbortedRunsOnGracefulAbort` option is enabled, in which case it returns the aborted
+     * Run, with its `abortedOnGracefulAbort` flag set to `true`.
+     *
      * FIXME: change the `input` parameter type from `object` to `Dictionary` after the `apify-client-js` issue is resolved:
      * https://github.com/apify/apify-client-js/issues/818.
      */

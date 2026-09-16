@@ -10,6 +10,7 @@ const DEFAULT_TEST_OPTIONS: OrchestratorOptions = {
     persistenceSupport: 'none',
     persistencePrefix: 'TEST-',
     abortAllRunsOnGracefulAbort: false,
+    returnAbortedRunsOnGracefulAbort: false,
     retryOnInsufficientResources: false,
 };
 
