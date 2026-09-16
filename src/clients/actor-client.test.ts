@@ -214,7 +214,7 @@ describe('ExtActorClient', () => {
         it('never returns when the Run is aborted by the Orchestrator on graceful abort', async () => {
             const abortedRunMock = createActorRunMock({ ...mockRun, requestId: 'test-run-1', status: 'ABORTED' });
             vi.spyOn(RunClient.prototype, 'waitForFinish').mockResolvedValue(abortedRunMock);
-            context.gracefulAbortTracker.markRunsAborted(['test-run-1']);
+            context.gracefulAbortTracker.markRunsAborted(['mock-run-id']);
 
             await expect(isStillPending(actorClient.call({ key: 'value1' }, { runName: 'test-run-1' }))).resolves.toBe(
                 true,
@@ -225,7 +225,7 @@ describe('ExtActorClient', () => {
             setUpClients({ returnAbortedRunsOnGracefulAbort: true });
             const abortedRunMock = createActorRunMock({ ...mockRun, requestId: 'test-run-1', status: 'ABORTED' });
             vi.spyOn(RunClient.prototype, 'waitForFinish').mockResolvedValue(abortedRunMock);
-            context.gracefulAbortTracker.markRunsAborted(['test-run-1']);
+            context.gracefulAbortTracker.markRunsAborted(['mock-run-id']);
 
             const run = await actorClient.call({ key: 'value1' }, { runName: 'test-run-1' });
 

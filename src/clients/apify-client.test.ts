@@ -354,7 +354,7 @@ describe('ExtApifyClient', () => {
 
             await client.abortAllRuns();
 
-            expect(context.gracefulAbortTracker.wasRunAborted('test-run-1')).toBe(false);
+            expect(context.gracefulAbortTracker.wasRunAborted('run-1-id')).toBe(false);
         });
 
         it('handles errors when aborting runs', async () => {
@@ -396,7 +396,7 @@ describe('ExtApifyClient', () => {
             await eventManager.waitForAllListenersToComplete();
 
             expect(abortSpy).toHaveBeenCalledTimes(1);
-            expect(context.gracefulAbortTracker.wasRunAborted('test-run-1')).toBe(true);
+            expect(context.gracefulAbortTracker.wasRunAborted('run-1-id')).toBe(true);
         });
 
         it('marks the Runs in progress as aborted by the Orchestrator', async () => {
@@ -414,8 +414,8 @@ describe('ExtApifyClient', () => {
 
             await gracefullyAbort();
 
-            expect(context.gracefulAbortTracker.wasRunAborted('test-run-1')).toBe(true);
-            expect(context.gracefulAbortTracker.wasRunAborted('test-run-2')).toBe(true);
+            expect(context.gracefulAbortTracker.wasRunAborted('run-1-id')).toBe(true);
+            expect(context.gracefulAbortTracker.wasRunAborted('run-2-id')).toBe(true);
         });
 
         it('does not mark the Runs that already finished', async () => {
@@ -431,8 +431,8 @@ describe('ExtApifyClient', () => {
 
             await gracefullyAbort();
 
-            expect(context.gracefulAbortTracker.wasRunAborted('succeeded-run')).toBe(false);
-            expect(context.gracefulAbortTracker.wasRunAborted('aborted-run')).toBe(false);
+            expect(context.gracefulAbortTracker.wasRunAborted('run-1-id')).toBe(false);
+            expect(context.gracefulAbortTracker.wasRunAborted('run-2-id')).toBe(false);
         });
     });
 

@@ -84,11 +84,11 @@ export class ExtApifyClient extends ApifyClient implements ExtendedApifyClient {
 
     private async abortAllRunsOnGracefulAbort(): Promise<void> {
         const currentRuns = this.context.runTracker.getCurrentRuns();
-        const abortedRequestIds = Object.entries(currentRuns)
+        const abortedRunIds = Object.values(currentRuns)
             // A Run that already finished, in any way, is not being aborted by the Orchestrator.
-            .filter(([, runInfo]) => !isRunTerminalStatus(runInfo.status))
-            .map(([requestId]) => requestId);
-        this.context.gracefulAbortTracker.markRunsAborted(abortedRequestIds);
+            .filter((runInfo) => !isRunTerminalStatus(runInfo.status))
+            .map((runInfo) => runInfo.runId);
+        this.context.gracefulAbortTracker.markRunsAborted(abortedRunIds);
         await this.abortRuns(currentRuns);
     }
 

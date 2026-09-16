@@ -114,7 +114,7 @@ export class ExtRunClient extends RunClient implements ExtendedRunClient {
      */
     private wasAbortedOnGracefulAbort(run: ActorRun): boolean {
         if (run.status !== 'ABORTED' && run.status !== 'ABORTING') return false;
-        return this.context.gracefulAbortTracker.wasRunAborted(this.requestId);
+        return this.context.gracefulAbortTracker.wasRunAborted(run.id);
     }
 
     /**
