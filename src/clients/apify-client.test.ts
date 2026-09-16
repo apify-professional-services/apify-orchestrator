@@ -1,3 +1,4 @@
+import { Actor } from 'apify';
 import { RunClient } from 'apify-client';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
@@ -342,6 +343,20 @@ describe('ExtApifyClient', () => {
             expect(abortSpy).toHaveBeenCalledTimes(2);
         });
 
+        it('does not mark the Runs as aborted on graceful abort', async () => {
+            const run1 = createActorRunMock({ id: 'run-1-id', status: 'RUNNING', startedAt: new Date() });
+
+            context.runTracker.updateRun('test-run-1', run1);
+
+            vi.spyOn(RunClient.prototype, 'abort').mockResolvedValue(
+                createActorRunMock({ status: 'ABORTED', startedAt: new Date() }),
+            );
+
+            await client.abortAllRuns();
+
+            expect(context.gracefulAbortTracker.wasRunAborted('test-run-1')).toBe(false);
+        });
+
         it('handles errors when aborting runs', async () => {
             const run1 = createActorRunMock({ id: 'run-1-id', status: 'RUNNING', startedAt: new Date() });
 
@@ -353,6 +368,71 @@ describe('ExtApifyClient', () => {
             await expect(client.abortAllRuns()).resolves.not.toThrow();
 
             expect(abortSpy).toHaveBeenCalledTimes(1);
+        });
+    });
+
+    describe('graceful abort', () => {
+        beforeEach(() => {
+            context = getClientContext({ abortAllRunsOnGracefulAbort: true });
+            client = new ExtApifyClient('test-client', context, {});
+        });
+
+        function gracefullyAbort(): Promise<void> {
+            // eslint-disable-next-line dot-notation
+            return client['abortAllRunsOnGracefulAbort']();
+        }
+
+        it('aborts the Runs in progress when the Actor is gracefully aborted', async () => {
+            const eventManager = Actor.config.getEventManager();
+            context.runTracker.updateRun(
+                'test-run-1',
+                createActorRunMock({ id: 'run-1-id', status: 'RUNNING', startedAt: new Date() }),
+            );
+            const abortSpy = vi
+                .spyOn(RunClient.prototype, 'abort')
+                .mockResolvedValue(createActorRunMock({ status: 'ABORTED', startedAt: new Date() }));
+
+            eventManager.emit('aborting');
+            await eventManager.waitForAllListenersToComplete();
+
+            expect(abortSpy).toHaveBeenCalledTimes(1);
+            expect(context.gracefulAbortTracker.wasRunAborted('test-run-1')).toBe(true);
+        });
+
+        it('marks the Runs in progress as aborted by the Orchestrator', async () => {
+            context.runTracker.updateRun(
+                'test-run-1',
+                createActorRunMock({ id: 'run-1-id', status: 'RUNNING', startedAt: new Date() }),
+            );
+            context.runTracker.updateRun(
+                'test-run-2',
+                createActorRunMock({ id: 'run-2-id', status: 'READY', startedAt: new Date() }),
+            );
+            vi.spyOn(RunClient.prototype, 'abort').mockResolvedValue(
+                createActorRunMock({ status: 'ABORTED', startedAt: new Date() }),
+            );
+
+            await gracefullyAbort();
+
+            expect(context.gracefulAbortTracker.wasRunAborted('test-run-1')).toBe(true);
+            expect(context.gracefulAbortTracker.wasRunAborted('test-run-2')).toBe(true);
+        });
+
+        it('does not mark the Runs that already finished', async () => {
+            context.runTracker.updateRun(
+                'succeeded-run',
+                createActorRunMock({ id: 'run-1-id', status: 'SUCCEEDED', startedAt: new Date() }),
+            );
+            context.runTracker.updateRun(
+                'aborted-run',
+                createActorRunMock({ id: 'run-2-id', status: 'ABORTED', startedAt: new Date() }),
+            );
+            vi.spyOn(RunClient.prototype, 'abort').mockRejectedValue(new Error('The Run has already finished'));
+
+            await gracefullyAbort();
+
+            expect(context.gracefulAbortTracker.wasRunAborted('succeeded-run')).toBe(false);
+            expect(context.gracefulAbortTracker.wasRunAborted('aborted-run')).toBe(false);
         });
     });
 

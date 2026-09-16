@@ -20,6 +20,7 @@ export const DEFAULT_ORCHESTRATOR_OPTIONS: OrchestratorOptions = {
     persistenceSupport: 'none',
     persistencePrefix: 'ORCHESTRATOR-',
     abortAllRunsOnGracefulAbort: true,
+    returnAbortedRunsOnGracefulAbort: false,
     retryOnInsufficientResources: true,
 };
 

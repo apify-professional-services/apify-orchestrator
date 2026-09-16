@@ -3,6 +3,7 @@ import type { RunClient } from 'apify-client';
 import { ExtRunClient } from '../clients/run-client.js';
 import type { RunStartRequest } from '../entities/run-start-request.js';
 import { AmbiguousRunRequestError } from '../errors.js';
+import { GracefulAbortTracker } from '../graceful-abort-tracker.js';
 import { RunScheduler } from '../run-scheduler.js';
 import type { TrackedRuns } from '../run-tracker.js';
 import { RunTracker } from '../run-tracker.js';
@@ -28,6 +29,7 @@ export class RunSearchOutcome extends Outcome<{
 export interface ClientContext extends OrchestratorContext {
     readonly runTracker: RunTracker;
     readonly runScheduler: RunScheduler;
+    readonly gracefulAbortTracker: GracefulAbortTracker;
     searchRunByRequestId(requestId: string): RunSearchOutcome;
     searchOkRunMatchingRequest(runRequest: RunStartRequest): RunSearchOutcome;
     extendRunClient(requestId: string, runClient: RunClient): ExtRunClient;
@@ -38,6 +40,7 @@ export function generateClientContext(
     trackedRuns: TrackedRuns,
 ): ClientContext {
     const runTracker = new RunTracker(orchestratorContext, trackedRuns);
+    const gracefulAbortTracker = new GracefulAbortTracker();
     const runScheduler = new RunScheduler(orchestratorContext, {
         runRequestAdapter: (request) => ({
             ...request,
@@ -71,6 +74,7 @@ export function generateClientContext(
         ...orchestratorContext,
         runTracker,
         runScheduler,
+        gracefulAbortTracker,
 
         searchRunByRequestId(requestId: string): RunSearchOutcome {
             // First, check if the Run is currently waiting to start.

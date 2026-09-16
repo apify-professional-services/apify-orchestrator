@@ -14,6 +14,7 @@ import type {
     DatasetClientListItemOptions,
     Dictionary,
     RunClient,
+    RunWaitForFinishOptions,
     TaskCallOptions,
     TaskClient,
     TaskLastRunOptions,
@@ -91,9 +92,35 @@ export interface OrchestratorOptions {
      * Notice that, if disabled, a function that is waiting for a Run to finish
      * may not notice when the orchestrator is aborted and will be killed abruptly.
      *
+     * When enabled, by default the methods waiting for one of those Runs, such as `call` and `waitForFinish`,
+     * never return: they hang until the process is killed, to prevent the execution of subsequent code after a Run is
+     * aborted by the Orchestrator. Set `returnAbortedRunsOnGracefulAbort` to change this behavior.
+     *
      * @default true
      */
     abortAllRunsOnGracefulAbort: boolean;
+
+    /**
+     * Return the Runs aborted by the Orchestrator on graceful abort, instead of hanging forever.
+     *
+     * When the Orchestrator aborts the Runs in progress on a graceful abort (see `abortAllRunsOnGracefulAbort`),
+     * the methods waiting for one of those Runs, such as `call` and `waitForFinish`, would resolve with an
+     * `ABORTED` Run, which is indistinguishable from a Run aborted by a user.
+     *
+     * If you enable this option, those methods return the aborted Run, with its `abortedOnGracefulAbort` flag
+     * set to `true`, so that you can tell the two cases apart and handle them yourself.
+     *
+     * **WARNING**: by default, this option is disabled, which means that the methods waiting for a Run aborted
+     * by the Orchestrator on a graceful abort **never return**: they hang until the Actor's process is killed,
+     * at the end of the graceful abort timeout. This is intended: your code is being shut down anyway, and it
+     * avoids executing the logic you would run after a successful Run.
+     * Enable this option only if you need to perform some clean-up after your Runs have been aborted.
+     *
+     * This option has no effect if `abortAllRunsOnGracefulAbort` is disabled.
+     *
+     * @default false
+     */
+    returnAbortedRunsOnGracefulAbort: boolean;
 
     /**
      * Whether to automatically retry failed (due to lack of memory/jobs) operations.
@@ -173,6 +200,11 @@ export interface ExtendedApifyClient extends ApifyClient {
     /**
      * Waits for one or more Runs previously started.
      *
+     * **NOTE**: if the Orchestrator aborts one of the Runs because the Actor was gracefully aborted
+     * (see the `abortAllRunsOnGracefulAbort` option), this method does not return: it hangs until the process is
+     * killed, unless the `returnAbortedRunsOnGracefulAbort` option is enabled, in which case it returns the aborted
+     * Runs, with their `abortedOnGracefulAbort` flag set to `true`.
+     *
      * @param batch an array of `ExtendedActorRun` objects or a list of request IDs or Run names
      * @returns the updated `ExtendedActorRun` objects
      */
@@ -180,6 +212,9 @@ export interface ExtendedApifyClient extends ApifyClient {
 
     /**
      * Stop all the Runs in progress started from this client.
+     *
+     * If you are currently waiting for any of the Runs to finish, those methods will return them with their status set
+     * to `ABORTED`, but without the `abortedOnGracefulAbort` flag.
      */
     abortAllRuns: () => Promise<void>;
 }
@@ -257,12 +292,22 @@ export interface ExtendedActorClient extends ActorClient {
     ) => Promise<ExtendedActorRun[]>;
 
     /**
+     * **NOTE**: if the Orchestrator aborts the Run because the Actor was gracefully aborted
+     * (see the `abortAllRunsOnGracefulAbort` option), this method does not return: it hangs until the process is
+     * killed, unless the `returnAbortedRunsOnGracefulAbort` option is enabled, in which case it returns the aborted
+     * Run, with its `abortedOnGracefulAbort` flag set to `true`.
+     *
      * @override
      */
     call: (input?: object, options?: ExtendedActorCallOptions) => Promise<ExtendedActorRun>;
 
     /**
      * Starts and waits for one or more Runs, based on an array of requests.
+     *
+     * **NOTE**: if the Orchestrator aborts one of the Runs because the Actor was gracefully aborted
+     * (see the `abortAllRunsOnGracefulAbort` option), this method does not return: it hangs until the process is
+     * killed, unless the `returnAbortedRunsOnGracefulAbort` option is enabled, in which case it returns the aborted
+     * Runs, with their `abortedOnGracefulAbort` flag set to `true`.
      */
     callRuns: (...runRequests: ActorRunRequest[]) => Promise<ExtendedActorRun[]>;
 
@@ -277,6 +322,11 @@ export interface ExtendedActorClient extends ActorClient {
      * @param overrideSplitRules the rules for splitting
      * @param options the options for starting the Runs
      * @returns the finished Runs
+     *
+     * **NOTE**: if the Orchestrator aborts one of the Runs because the Actor was gracefully aborted
+     * (see the `abortAllRunsOnGracefulAbort` option), this method does not return: it hangs until the process is
+     * killed, unless the `returnAbortedRunsOnGracefulAbort` option is enabled, in which case it returns the aborted
+     * Runs, with their `abortedOnGracefulAbort` flag set to `true`.
      */
     callBatch: <T>(
         namePrefix: string,
@@ -368,12 +418,22 @@ export interface ExtendedTaskClient extends TaskClient {
     ) => Promise<ExtendedActorRun[]>;
 
     /**
+     * **NOTE**: if the Orchestrator aborts the Run because the Actor was gracefully aborted
+     * (see the `abortAllRunsOnGracefulAbort` option), this method does not return: it hangs until the process is
+     * killed, unless the `returnAbortedRunsOnGracefulAbort` option is enabled, in which case it returns the aborted
+     * Run, with its `abortedOnGracefulAbort` flag set to `true`.
+     *
      * @override
      */
     call: (input?: Dictionary, options?: ExtendedTaskCallOptions) => Promise<ExtendedActorRun>;
 
     /**
      * Starts and waits for one or more Runs, based on an array of requests.
+     *
+     * **NOTE**: if the Orchestrator aborts one of the Runs because the Actor was gracefully aborted
+     * (see the `abortAllRunsOnGracefulAbort` option), this method does not return: it hangs until the process is
+     * killed, unless the `returnAbortedRunsOnGracefulAbort` option is enabled, in which case it returns the aborted
+     * Runs, with their `abortedOnGracefulAbort` flag set to `true`.
      */
     callRuns: (...runRequests: TaskRunRequest[]) => Promise<ExtendedActorRun[]>;
 
@@ -388,6 +448,11 @@ export interface ExtendedTaskClient extends TaskClient {
      * @param overrideSplitRules the rules for splitting
      * @param options the options for starting the Runs
      * @returns the finished Runs
+     *
+     * **NOTE**: if the Orchestrator aborts one of the Runs because the Actor was gracefully aborted
+     * (see the `abortAllRunsOnGracefulAbort` option), this method does not return: it hangs until the process is
+     * killed, unless the `returnAbortedRunsOnGracefulAbort` option is enabled, in which case it returns the aborted
+     * Runs, with their `abortedOnGracefulAbort` flag set to `true`.
      */
     callBatch: <T>(
         namePrefix: string,
@@ -411,7 +476,19 @@ export interface ExtendedTaskClient extends TaskClient {
  *
  * @extends RunClient
  */
-export type ExtendedRunClient = RunClient;
+export interface ExtendedRunClient extends RunClient {
+    /**
+     * Waits for the Run to finish.
+     *
+     * **NOTE**: if the Orchestrator aborts the Run because the Actor was gracefully aborted
+     * (see the `abortAllRunsOnGracefulAbort` option), this method does not return: it hangs until the process is
+     * killed, unless the `returnAbortedRunsOnGracefulAbort` option is enabled, in which case it returns the aborted
+     * Run, with its `abortedOnGracefulAbort` flag set to `true`.
+     *
+     * @override
+     */
+    waitForFinish: (options?: RunWaitForFinishOptions) => Promise<ExtendedActorRun>;
+}
 
 /**
  * A Dataset client allowing to iterate over the items in the dataset, automatically paginated.
@@ -471,7 +548,21 @@ export interface TaskRunRequest {
 }
 
 export interface ExtendedActorRun extends ActorRun {
+    /**
+     * The ID of the request that started this Run: the `runName` provided by the user, or a generated hash.
+     */
     requestId: string;
+
+    /**
+     * `true` if this Run was aborted by the Orchestrator because the Actor was gracefully aborted
+     * (see the `abortAllRunsOnGracefulAbort` option); `undefined` in any other case, including when the Run
+     * was aborted by a user.
+     *
+     * Notice that the methods waiting for a Run to finish, such as `call` and `waitForFinish`, return an
+     * `ExtendedActorRun` with this flag only if the `returnAbortedRunsOnGracefulAbort` option is enabled:
+     * otherwise, they never return.
+     */
+    abortedOnGracefulAbort?: true;
 }
 
 /**

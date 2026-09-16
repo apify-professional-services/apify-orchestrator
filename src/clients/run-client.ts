@@ -9,8 +9,9 @@ import type {
 } from 'apify-client';
 import { RunClient } from 'apify-client';
 
-import type { OrchestratorContext } from '../context/orchestrator-context.js';
+import type { ClientContext } from '../context/client-context.js';
 import type { ExtendedActorRun, ExtendedRunClient } from '../types.js';
+import { hangForever } from '../utils/concurrency/hang.js';
 
 export interface ExtRunClientOptions {
     requestId: string;
@@ -19,13 +20,13 @@ export interface ExtRunClientOptions {
 
 export class ExtRunClient extends RunClient implements ExtendedRunClient {
     readonly requestId: string;
-    private readonly context: OrchestratorContext;
+    private readonly context: ClientContext;
     private readonly options: ExtRunClientOptions;
 
     /**
      * @internal
      */
-    constructor(context: OrchestratorContext, options: ExtRunClientOptions, runClient: RunClient) {
+    constructor(context: ClientContext, options: ExtRunClientOptions, runClient: RunClient) {
         const { requestId } = options;
         super({
             baseUrl: runClient.baseUrl,
@@ -96,10 +97,38 @@ export class ExtRunClient extends RunClient implements ExtendedRunClient {
         const run = await super.waitForFinish(options);
         const extendedRun = this.extendedRun(run);
         this.options.onUpdate(extendedRun);
+        if (extendedRun.abortedOnGracefulAbort && !this.context.options.returnAbortedRunsOnGracefulAbort) {
+            return this.hangUntilTheProcessIsKilled();
+        }
         return extendedRun;
     }
 
     private extendedRun(run: ActorRun): ExtendedActorRun {
-        return { ...run, requestId: this.requestId };
+        const extendedRun: ExtendedActorRun = { ...run, requestId: this.requestId };
+        return this.wasAbortedOnGracefulAbort(run) ? { ...extendedRun, abortedOnGracefulAbort: true } : extendedRun;
+    }
+
+    /**
+     * A Run is considered aborted by the Orchestrator if it is aborted, or being aborted,
+     * and the Orchestrator marked it as one of the Runs it aborted on a graceful abort.
+     */
+    private wasAbortedOnGracefulAbort(run: ActorRun): boolean {
+        if (run.status !== 'ABORTED' && run.status !== 'ABORTING') return false;
+        return this.context.gracefulAbortTracker.wasRunAborted(this.requestId);
+    }
+
+    /**
+     * Never settles: the Actor is being gracefully aborted, and the process will be killed
+     * at the end of the graceful abort timeout.
+     */
+    private async hangUntilTheProcessIsKilled(): Promise<never> {
+        this.context.logger
+            .prefixed(this.requestId)
+            .warning(
+                'The Run was aborted by the Orchestrator on graceful abort: ' +
+                    'waiting for the Actor to be killed instead of returning the aborted Run. ' +
+                    'Enable the `returnAbortedRunsOnGracefulAbort` option to return it instead.',
+            );
+        return hangForever();
     }
 }

@@ -4,7 +4,8 @@ import { ApifyClient } from 'apify-client';
 
 import type { ClientContext } from '../context/client-context.js';
 import { type RunStartRequest } from '../entities/run-start-request.js';
-import type { DatasetItem, ExtendedActorRun, ExtendedApifyClient } from '../types.js';
+import type { DatasetItem, ExtendedActorRun, ExtendedApifyClient, RunInfo } from '../types.js';
+import { isRunTerminalStatus } from '../utils/apify-client.js';
 import { isDefined } from '../utils/typing.js';
 import { ExtActorClient } from './actor-client.js';
 import { ExtDatasetClient } from './dataset-client.js';
@@ -24,7 +25,7 @@ export class ExtApifyClient extends ApifyClient implements ExtendedApifyClient {
         this.context = context;
 
         if (context.options.abortAllRunsOnGracefulAbort) {
-            Actor.on('aborting', this.abortAllRuns.bind(this));
+            Actor.on('aborting', this.abortAllRunsOnGracefulAbort.bind(this));
         }
     }
 
@@ -78,7 +79,20 @@ export class ExtApifyClient extends ApifyClient implements ExtendedApifyClient {
     }
 
     async abortAllRuns(): Promise<void> {
+        await this.abortRuns(this.context.runTracker.getCurrentRuns());
+    }
+
+    private async abortAllRunsOnGracefulAbort(): Promise<void> {
         const currentRuns = this.context.runTracker.getCurrentRuns();
+        const abortedRequestIds = Object.entries(currentRuns)
+            // A Run that already finished, in any way, is not being aborted by the Orchestrator.
+            .filter(([, runInfo]) => !isRunTerminalStatus(runInfo.status))
+            .map(([requestId]) => requestId);
+        this.context.gracefulAbortTracker.markRunsAborted(abortedRequestIds);
+        await this.abortRuns(currentRuns);
+    }
+
+    private async abortRuns(currentRuns: { [requestId: string]: RunInfo }): Promise<void> {
         this.context.logger.info('Aborting Runs', { currentRunNames: Object.keys(currentRuns) });
         await Promise.all(
             Object.entries(currentRuns).map(async ([requestId, runInfo]) => {
