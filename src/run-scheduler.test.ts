@@ -1,14 +1,14 @@
 import { Actor } from 'apify';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
-import { getTestContext, getTestOptions } from './__unit__/context.js';
+import { getClientContext, getTestOptions } from './__unit__/context.js';
 import { createActorRunMock, createMockRunSource } from './__unit__/mocks.js';
 import { MAIN_LOOP_INTERVAL_MS } from './constants.js';
-import type { OrchestratorContext } from './context/orchestrator-context.js';
+import type { ClientContext } from './context/client-context.js';
 import type { RunStartRequest } from './entities/run-start-request.js';
 import { InsufficientMemoryError } from './errors.js';
-import type { RunSchedulerOptions } from './run-scheduler.js';
 import { RunScheduler } from './run-scheduler.js';
+import type { OrchestratorOptions } from './types.js';
 import * as trySync from './utils/concurrency/try-sync.js';
 
 function getAttemptProcessingAllRequests(runScheduler: RunScheduler) {
@@ -17,9 +17,7 @@ function getAttemptProcessingAllRequests(runScheduler: RunScheduler) {
 }
 
 describe('RunScheduler', () => {
-    let context: OrchestratorContext;
-
-    const onRunStarted = vi.fn();
+    let context: ClientContext;
 
     const runMock = createActorRunMock({
         id: 'test-run-id',
@@ -28,17 +26,13 @@ describe('RunScheduler', () => {
         startedAt: new Date('2024-01-01T00:00:00.000Z'),
     });
 
-    function buildRunScheduler(overrideOptions?: Partial<RunSchedulerOptions>) {
-        const options: RunSchedulerOptions = {
-            runRequestAdapter: (request) => request,
-            onRunStarted,
-            ...overrideOptions,
-        };
-        return new RunScheduler(context, options);
+    function buildRunScheduler(overrideOptions?: Partial<OrchestratorOptions>) {
+        context = getClientContext(getTestOptions({ retryOnInsufficientResources: true, ...overrideOptions }));
+        return context.runScheduler;
     }
 
     beforeEach(() => {
-        context = getTestContext(getTestOptions({ retryOnInsufficientResources: true }));
+        context = getClientContext(getTestOptions({ retryOnInsufficientResources: true }));
     });
 
     afterEach(() => {
@@ -110,7 +104,9 @@ describe('RunScheduler', () => {
         expect(run).toBeDefined();
         expect(run.id).toBe('test-run-id');
         expect(mockSource.start).toHaveBeenCalledWith({ key: 'value' }, undefined);
-        expect(onRunStarted).toHaveBeenCalledWith('test-run', run);
+        expect(context.runTracker.getCurrentRuns()['test-run']).toEqual(
+            expect.objectContaining({ runId: 'test-run-id' }),
+        );
     });
 
     it('does not start duplicate runs with the same name', async () => {
@@ -139,13 +135,8 @@ describe('RunScheduler', () => {
         expect(mockSource.start).toHaveBeenCalledTimes(1);
     });
 
-    it('applies the runRequestAdapter before starting', async () => {
-        const runRequestAdapter = vi.fn((request) => ({
-            ...request,
-            input: { ...request.input, adapted: true },
-        }));
-
-        const runScheduler = buildRunScheduler({ runRequestAdapter });
+    it('merges the fixed input before starting', async () => {
+        const runScheduler = buildRunScheduler({ fixedInput: { fixed: true } });
         const mockSource = createMockRunSource(runMock);
 
         const runRequest: RunStartRequest = {
@@ -157,8 +148,7 @@ describe('RunScheduler', () => {
 
         await runScheduler.startRun(runRequest);
 
-        expect(runRequestAdapter).toHaveBeenCalledWith(runRequest);
-        expect(mockSource.start).toHaveBeenCalledWith({ key: 'value', adapted: true }, undefined);
+        expect(mockSource.start).toHaveBeenCalledWith({ key: 'value', fixed: true }, undefined);
     });
 
     it('returns undefined when finding a non-existent run', () => {

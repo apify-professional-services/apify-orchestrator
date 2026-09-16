@@ -13,7 +13,6 @@ import type {
     TaskRunRequest,
 } from '../types.js';
 import { isDefined } from '../utils/typing.js';
-import type { ExtApifyClient } from './apify-client.js';
 import type { ExtRunClient } from './run-client.js';
 
 export class ExtTaskClient extends TaskClient implements ExtendedTaskClient {
@@ -25,19 +24,17 @@ export class ExtTaskClient extends TaskClient implements ExtendedTaskClient {
     });
 
     private readonly context: ClientContext;
-    override apifyClient: ExtApifyClient;
 
-    constructor(context: ClientContext, apifyClient: ExtApifyClient, taskClient: TaskClient) {
+    constructor(context: ClientContext, taskClient: TaskClient) {
         super({
             baseUrl: taskClient.baseUrl,
             publicBaseUrl: taskClient.publicBaseUrl,
-            apifyClient,
+            apifyClient: context.client,
             httpClient: taskClient.httpClient,
             id: taskClient.id,
             params: taskClient.params,
         });
         this.context = context;
-        this.apifyClient = apifyClient;
     }
 
     enqueue(...runRequests: TaskRunRequest[]): string[] {
@@ -49,7 +46,7 @@ export class ExtTaskClient extends TaskClient implements ExtendedTaskClient {
                 input,
                 options,
             });
-            this.apifyClient.findOrRequestRunStart(runStartRequest);
+            this.context.findOrRequestRunStart(runStartRequest);
             return runStartRequest.requestId;
         });
     }
@@ -74,7 +71,7 @@ export class ExtTaskClient extends TaskClient implements ExtendedTaskClient {
 
     override async start(input?: Dictionary, options: ExtendedTaskStartOptions = {}): Promise<ExtendedActorRun> {
         const { runName, ...runOptions } = options;
-        return this.apifyClient.findOrStartRun(
+        return this.context.findOrStartRun(
             buildRunStartRequest({
                 source: this.runSource,
                 runName,
@@ -93,12 +90,12 @@ export class ExtTaskClient extends TaskClient implements ExtendedTaskClient {
     override async call(input?: Dictionary, options?: ExtendedTaskCallOptions): Promise<ExtendedActorRun> {
         const { waitSecs, ...startOptions } = options ?? {};
         const startedRun = await this.start(input, startOptions);
-        return this.apifyClient.extendedRunClient(startedRun.requestId, startedRun.id).waitForFinish({ waitSecs });
+        return this.context.extendRunClient(startedRun.requestId, startedRun.id).waitForFinish({ waitSecs });
     }
 
     override lastRun(options?: TaskLastRunOptions): RunClient | ExtRunClient {
         const runClient = super.lastRun(options);
-        return isDefined(runClient.id) ? this.apifyClient.run(runClient.id) : runClient;
+        return isDefined(runClient.id) ? this.context.client.run(runClient.id) : runClient;
     }
 
     async startRuns(...runRequests: TaskRunRequest[]): Promise<ExtendedActorRun[]> {

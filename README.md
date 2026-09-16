@@ -26,6 +26,9 @@ instead, it allows you to trigger one or more new Runs from everywhere in your c
 - All public objects are exported from the `index.ts` file. This includes all the types in `types.ts`:
     - if you want to create a new public interface, put it in `types.ts`, give it a meaningful name and add some `js-doc` to it, if necessary;
     - no internal interface should be in `types.ts`, because it would be exported to the user.
+- The components share their state and their behavior through two layered contexts, in the `context` folder:
+    - the `OrchestratorContext` carries what is common to the whole Orchestrator: the options and the logger;
+    - the `ClientContext` extends it with everything that belongs to a single client and which may differ from one client to another.
 
 Thanks for your contributions!
 

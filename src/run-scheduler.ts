@@ -1,5 +1,5 @@
 import { MAIN_LOOP_COOLDOWN_MS, MAIN_LOOP_INTERVAL_MS } from './constants.js';
-import type { OrchestratorContext } from './context/orchestrator-context.js';
+import type { ClientContext } from './context/client-context.js';
 import type { RunStartRequest } from './entities/run-start-request.js';
 import { isInsufficientResourcesError } from './errors.js';
 import type { ExtendedActorRun } from './types.js';
@@ -8,16 +8,12 @@ import { TryCooldown } from './utils/concurrency/try-cooldown.js';
 import { TryGate } from './utils/concurrency/try-gate.js';
 import { TryLock } from './utils/concurrency/try-lock.js';
 import { synchronizedAttempt } from './utils/concurrency/try-sync.js';
+import { mergeDictionaries } from './utils/dictionaries.js';
 import { stringifyError } from './utils/errors.js';
 import { RequestPool } from './utils/request-management/request-pool.js';
 import { RequestOutcome } from './utils/request-management/request.js';
 import { onActorShuttingDown } from './utils/run-lifecycle.js';
 import { isDefined } from './utils/typing.js';
-
-export interface RunSchedulerOptions {
-    runRequestAdapter: (request: RunStartRequest) => RunStartRequest;
-    onRunStarted: (requestId: string, run: ExtendedActorRun) => void;
-}
 
 /**
  * Schedules Run start requests, ensuring that only one Run with a given name is started at a time,
@@ -34,15 +30,13 @@ export class RunScheduler {
 
     private readonly interval = new Interval(this.attemptProcessingAllRequests.bind(this), MAIN_LOOP_INTERVAL_MS);
 
-    private readonly context: OrchestratorContext;
-    private readonly options: RunSchedulerOptions;
+    private readonly context: ClientContext;
 
-    constructor(context: OrchestratorContext, options: RunSchedulerOptions) {
+    constructor(context: ClientContext) {
         this.context = context;
-        this.options = options;
         this.pool = new RequestPool<RunStartRequest, ExtendedActorRun>({
             onRequestAdded: (requestId) => this.context.logger.prefixed(requestId).info('Run start scheduled.'),
-            onRequestSuccess: options.onRunStarted,
+            onRequestSuccess: (requestId, run) => this.context.trackRunUpdate(requestId, run),
             onRequestFailure: (requestId, error) => {
                 this.context.logger.prefixed(requestId).error('Run start failed.', { error: stringifyError(error) });
             },
@@ -118,12 +112,14 @@ export class RunScheduler {
     }
 
     private async processRunRequest(request: RunStartRequest): Promise<RequestOutcome<ExtendedActorRun>> {
-        const adaptedRequest = this.options.runRequestAdapter(request);
+        const adaptedRequest: RunStartRequest = {
+            ...request,
+            input: mergeDictionaries(this.context.options.fixedInput, request.input),
+        };
         const { requestId } = adaptedRequest;
         try {
             const run = await adaptedRequest.source.start(adaptedRequest.input, adaptedRequest.options);
-            const extendedRun: ExtendedActorRun = { ...run, requestId };
-            return new RequestOutcome({ success: extendedRun });
+            return new RequestOutcome({ success: this.context.buildExtendedRun(requestId, run) });
         } catch (error) {
             const parsedError = await adaptedRequest.source.parseRunStartError(
                 error,

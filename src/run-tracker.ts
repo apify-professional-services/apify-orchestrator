@@ -1,6 +1,6 @@
 import type { ActorRun } from 'apify-client';
 
-import type { OrchestratorContext } from './context/orchestrator-context.js';
+import type { ClientContext } from './context/client-context.js';
 import type { ExtendedActorRun, RunInfo } from './types.js';
 import { isRunFailStatus } from './utils/apify-client.js';
 import { getRunUrl } from './utils/apify-console.js';
@@ -13,10 +13,10 @@ export interface TrackedRuns {
 }
 
 export class RunTracker {
-    private readonly context: OrchestratorContext;
+    private readonly context: ClientContext;
     private readonly trackedRuns: TrackedRuns;
 
-    constructor(context: OrchestratorContext, trackedRuns: TrackedRuns) {
+    constructor(context: ClientContext, trackedRuns: TrackedRuns) {
         this.context = context;
         this.trackedRuns = trackedRuns;
         this.itemsChangedCallback();

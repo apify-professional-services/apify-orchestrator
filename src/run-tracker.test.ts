@@ -1,12 +1,12 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
-import { getTestContext } from './__unit__/context.js';
+import { getClientContext } from './__unit__/context.js';
 import { createActorRunMock } from './__unit__/mocks.js';
 import { RunTracker } from './run-tracker.js';
 import type { ExtendedActorRun, RunInfo } from './types.js';
 
 describe('RunTracker', async () => {
-    const context = getTestContext();
+    const context = getClientContext();
 
     const runMock = createActorRunMock({
         id: 'test-run-id',

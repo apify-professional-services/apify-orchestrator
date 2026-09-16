@@ -1,11 +1,8 @@
-import { Actor } from 'apify';
 import type { ApifyClientOptions, RunClient } from 'apify-client';
 import { ApifyClient } from 'apify-client';
 
 import type { ClientContext } from '../context/client-context.js';
-import { type RunStartRequest } from '../entities/run-start-request.js';
-import type { DatasetItem, ExtendedActorRun, ExtendedApifyClient, RunInfo } from '../types.js';
-import { isRunTerminalStatus } from '../utils/apify-client.js';
+import type { DatasetItem, ExtendedActorRun, ExtendedApifyClient } from '../types.js';
 import { isDefined } from '../utils/typing.js';
 import { ExtActorClient } from './actor-client.js';
 import { ExtDatasetClient } from './dataset-client.js';
@@ -13,28 +10,26 @@ import type { ExtRunClient } from './run-client.js';
 import { ExtTaskClient } from './task-client.js';
 
 export class ExtApifyClient extends ApifyClient implements ExtendedApifyClient {
-    public readonly clientName: string;
     private readonly context: ClientContext;
 
     /**
      * @internal
      */
-    constructor(clientName: string, context: ClientContext, superClientOptions: ApifyClientOptions) {
+    constructor(context: ClientContext, superClientOptions: ApifyClientOptions) {
         super(superClientOptions);
-        this.clientName = clientName;
         this.context = context;
+    }
 
-        if (context.options.abortAllRunsOnGracefulAbort) {
-            Actor.on('aborting', this.abortAllRunsOnGracefulAbort.bind(this));
-        }
+    get clientName(): string {
+        return this.context.clientName;
     }
 
     override actor(id: string): ExtActorClient {
-        return new ExtActorClient(this.context, this, super.actor(id));
+        return new ExtActorClient(this.context, super.actor(id));
     }
 
     override task(id: string): ExtTaskClient {
-        return new ExtTaskClient(this.context, this, super.task(id));
+        return new ExtTaskClient(this.context, super.task(id));
     }
 
     override dataset<T extends DatasetItem>(id: string): ExtDatasetClient<T> {
@@ -43,15 +38,24 @@ export class ExtApifyClient extends ApifyClient implements ExtendedApifyClient {
 
     override run(id: string): RunClient {
         const requestId = this.context.runTracker.findRunRequestId(id);
-        const runClient = super.run(id);
-        return isDefined(requestId) ? this.context.extendRunClient(requestId, runClient) : runClient;
+        return isDefined(requestId) ? this.context.extendRunClient(requestId, id) : super.run(id);
+    }
+
+    /**
+     * Builds a plain Run client, bypassing the `run` override: it is how the context obtains the Run clients
+     * it extends, since `ApifyClient` offers no other way to build one.
+     *
+     * @internal
+     */
+    baseRun(id: string): RunClient {
+        return super.run(id);
     }
 
     async runByRequest(requestId: string): Promise<ExtRunClient | undefined> {
         return this.context.searchRunByRequestId(requestId).match({
             promise: async (waitForStart) =>
-                waitForStart().then((run) => this.context.extendRunClient(requestId, super.run(run.id))),
-            runInfo: async (runInfo) => this.context.extendRunClient(requestId, super.run(runInfo.runId)),
+                waitForStart().then((run) => this.context.extendRunClient(requestId, run.id)),
+            runInfo: async (runInfo) => this.context.extendRunClient(requestId, runInfo.runId),
             notFound: () => undefined,
         });
     }
@@ -59,7 +63,7 @@ export class ExtApifyClient extends ApifyClient implements ExtendedApifyClient {
     async actorRunByRequest(requestId: string): Promise<ExtendedActorRun | undefined> {
         return this.context.searchRunByRequestId(requestId).match({
             promise: async (waitForStart) => waitForStart(),
-            runInfo: async (runInfo) => this.context.extendRunClient(requestId, super.run(runInfo.runId)).get(),
+            runInfo: async (runInfo) => this.context.extendRunClient(requestId, runInfo.runId).get(),
             notFound: () => undefined,
         });
     }
@@ -74,84 +78,12 @@ export class ExtApifyClient extends ApifyClient implements ExtendedApifyClient {
         this.context.logger.info('Waiting for batch', { requestIds: runs.map(({ requestId }) => requestId) });
 
         return Promise.all(
-            runs.map(async (run) => this.context.extendRunClient(run.requestId, super.run(run.id)).waitForFinish()),
+            runs.map(async (run) => this.context.extendRunClient(run.requestId, run.id).waitForFinish()),
         );
     }
 
     async abortAllRuns(): Promise<void> {
-        await this.abortRuns(this.context.runTracker.getCurrentRuns());
-    }
-
-    private async abortAllRunsOnGracefulAbort(): Promise<void> {
-        const currentRuns = this.context.runTracker.getCurrentRuns();
-        const abortedRunIds = Object.values(currentRuns)
-            // A Run that already finished, in any way, is not being aborted by the Orchestrator.
-            .filter((runInfo) => !isRunTerminalStatus(runInfo.status))
-            .map((runInfo) => runInfo.runId);
-        this.context.gracefulAbortTracker.markRunsAborted(abortedRunIds);
-        await this.abortRuns(currentRuns);
-    }
-
-    private async abortRuns(currentRuns: { [requestId: string]: RunInfo }): Promise<void> {
-        this.context.logger.info('Aborting Runs', { currentRunNames: Object.keys(currentRuns) });
-        await Promise.all(
-            Object.entries(currentRuns).map(async ([requestId, runInfo]) => {
-                const runClient = this.context.extendRunClient(requestId, super.run(runInfo.runId));
-                this.context.logger.prefixed(requestId).info('Aborting Run', {}, { url: runInfo.runUrl });
-                await runClient.abort().catch((error) => {
-                    this.context.logger.prefixed(requestId).error('Error aborting Run', { error });
-                });
-            }),
-        );
-    }
-
-    /** @internal */
-    extendedRunClient(requestId: string, runId: string): ExtRunClient {
-        const runClient = super.run(runId);
-        return this.context.extendRunClient(requestId, runClient);
-    }
-
-    /**
-     * Finds an existing Run by name or requests to start a new one if none exists or the existing one is not in an OK status.
-     *
-     * @returns a handle to wait for the Run to start.
-     *
-     * @internal
-     */
-    findOrRequestRunStart(runRequest: RunStartRequest): () => Promise<ExtendedActorRun> {
-        return this.context.searchOkRunMatchingRequest(runRequest).match({
-            promise: (waitForStart) => waitForStart,
-            runInfo:
-                ({ runId }) =>
-                async () =>
-                    this.getRunObjectOrStartNew(runRequest, runId),
-            notFound: () => this.context.runScheduler.requestRunStart(runRequest),
-        });
-    }
-
-    /**
-     * Finds an existing Run by name or starts a new one if none exists or the existing one is not in an OK status.
-     *
-     * @returns the new or existing Run after it has started.
-     *
-     * @internal
-     */
-    async findOrStartRun(runRequest: RunStartRequest): Promise<ExtendedActorRun> {
-        return this.context.searchOkRunMatchingRequest(runRequest).match({
-            promise: async (waitForStart) => waitForStart(),
-            runInfo: async ({ runId }) => this.getRunObjectOrStartNew(runRequest, runId),
-            notFound: async () => this.context.runScheduler.startRun(runRequest),
-        });
-    }
-
-    private async getRunObjectOrStartNew(
-        runRequest: RunStartRequest,
-        existingRunId: string,
-    ): Promise<ExtendedActorRun> {
-        const existingRun = await this.context.extendRunClient(runRequest.requestId, super.run(existingRunId)).get();
-        if (existingRun) return existingRun;
-        // If the Run client could not retrieve the Run object, we proceed to start a new one.
-        return this.context.runScheduler.startRun(runRequest);
+        await this.context.abortAllRuns();
     }
 }
 
