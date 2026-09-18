@@ -1,7 +1,7 @@
 import { Actor } from 'apify';
 
 import type { RunInfo } from '../../types.js';
-import { isRunTerminalStatus } from '../../utils/apify-client.js';
+import { isRunOkStatus, isRunTerminalStatus } from '../../utils/apify-client.js';
 import type { ClientContext } from '../client-context.js';
 
 /**
@@ -20,8 +20,8 @@ export async function abortAllRuns(context: ClientContext): Promise<void> {
 export async function abortAllRunsOnGracefulAbort(context: ClientContext): Promise<void> {
     const currentRuns = context.runTracker.getCurrentRuns();
     const abortedRunIds = Object.values(currentRuns)
-        // A Run that already finished, in any way, is not being aborted by the Orchestrator.
-        .filter((runInfo) => !isRunTerminalStatus(runInfo.status))
+        // A Run that already finished or is shutting down is not being aborted by the Orchestrator.
+        .filter((runInfo) => !isRunTerminalStatus(runInfo.status) && isRunOkStatus(runInfo.status))
         .map((runInfo) => runInfo.runId);
     // The Runs must be marked before being aborted, to avoid a race with any `waitForFinish` in progress.
     context.markRunsAbortedOnGracefulAbort(abortedRunIds);
