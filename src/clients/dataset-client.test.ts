@@ -4,7 +4,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { getClientContext } from '../__unit__/context.js';
 import { createActorRunMock } from '../__unit__/mocks.js';
 import type { DatasetItem } from '../types.js';
-import { ExtApifyClient } from './apify-client.js';
+import type { ExtApifyClient } from './apify-client.js';
 import type { ExtDatasetClient } from './dataset-client.js';
 
 interface TestItem extends DatasetItem {
@@ -17,7 +17,7 @@ describe('ExtDatasetClient', () => {
 
     beforeEach(() => {
         const context = getClientContext();
-        apifyClient = new ExtApifyClient('test-client', context, {});
+        apifyClient = context.client;
         datasetClient = apifyClient.dataset('test-dataset-id');
     });
 

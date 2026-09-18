@@ -55,8 +55,12 @@ export class Orchestrator implements ApifyOrchestrator {
         const trackedRuns =
             (await this.storage?.useState<TrackedRuns>(storageKey, defaultTrackedRuns)) ?? defaultTrackedRuns;
 
-        const clientContext = generateClientContext(this.context, trackedRuns);
+        const clientContext = generateClientContext(this.context, {
+            clientName,
+            trackedRuns,
+            createClient: (context) => new ExtApifyClient(context, superClientOptions),
+        });
 
-        return new ExtApifyClient(clientName, clientContext, superClientOptions);
+        return clientContext.client;
     }
 }

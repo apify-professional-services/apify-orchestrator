@@ -1,3 +1,6 @@
+import type { ApifyClientOptions } from 'apify-client';
+
+import { ExtApifyClient } from '../clients/apify-client.js';
 import type { ClientContext } from '../context/client-context.js';
 import { generateClientContext } from '../context/client-context.js';
 import type { OrchestratorContext } from '../context/orchestrator-context.js';
@@ -23,7 +26,13 @@ export function getTestContext(overrideOptions?: Partial<OrchestratorOptions>): 
     return generateOrchestratorContext(options);
 }
 
-export function getClientContext(overrideOptions?: Partial<OrchestratorOptions>): ClientContext {
+/**
+ * Generates a client context, which already owns its own `ExtApifyClient`, available as `context.client`.
+ */
+export function getClientContext(
+    overrideOptions?: Partial<OrchestratorOptions>,
+    clientOptions: ApifyClientOptions = {},
+): ClientContext {
     const orchestratorContext = getTestContext(overrideOptions);
 
     // Create empty tracked runs for testing
@@ -32,5 +41,9 @@ export function getClientContext(overrideOptions?: Partial<OrchestratorOptions>)
         failedHistory: {},
     };
 
-    return generateClientContext(orchestratorContext, trackedRuns);
+    return generateClientContext(orchestratorContext, {
+        clientName: 'test-client',
+        trackedRuns,
+        createClient: (context) => new ExtApifyClient(context, clientOptions),
+    });
 }

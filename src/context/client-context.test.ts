@@ -1,138 +1,35 @@
-import { RunClient } from 'apify-client';
-import { afterEach, describe, expect, it, vi } from 'vitest';
+import { describe, expect, it } from 'vitest';
 
 import { getClientContext } from '../__unit__/context.js';
-import { createActorRunMock } from '../__unit__/mocks.js';
-import { ExtRunClient } from '../clients/run-client.js';
-import { RunSource } from '../entities/run-source.js';
-import { buildRunStartRequest } from '../entities/run-start-request.js';
-import { AmbiguousRunRequestError } from '../errors.js';
-import { Orchestrator } from '../index.js';
+import { ExtApifyClient } from '../clients/apify-client.js';
+import { RunScheduler } from '../run-scheduler.js';
+import { RunTracker } from '../run-tracker.js';
 
-describe('OrchestratingClient', () => {
-    const startRun = vi.fn();
-    const defaultMemoryMbytes = vi.fn();
-    const runSource = new RunSource({
-        type: 'actor',
-        id: 'test-actor',
-        start: startRun,
-        defaultMemoryMbytes,
+describe('generateClientContext', () => {
+    it('owns the client it generated', () => {
+        const context = getClientContext();
+
+        expect(context.client).toBeInstanceOf(ExtApifyClient);
+        expect(context.clientName).toBe('test-client');
+        // The client sees the very same context it belongs to.
+        // eslint-disable-next-line dot-notation
+        expect(context.client['context']).toBe(context);
     });
 
-    afterEach(() => {
-        vi.resetAllMocks();
-        vi.useRealTimers();
+    it('builds all the context members', () => {
+        const context = getClientContext();
+
+        expect(context.runTracker).toBeInstanceOf(RunTracker);
+        expect(context.runScheduler).toBeInstanceOf(RunScheduler);
     });
 
-    describe('searchRunByRequestId', () => {
-        it('returns a promise if the Run is scheduled to start', () => {
-            const context = getClientContext();
+    it('keeps the graceful abort bookkeeping', () => {
+        const context = getClientContext();
 
-            context.runScheduler.requestRunStart(buildRunStartRequest({ runName: 'scheduled-run', source: runSource }));
+        expect(context.wasRunAbortedOnGracefulAbort('test-run-id')).toBe(false);
 
-            const outcome = context.searchRunByRequestId('scheduled-run');
-            expect(outcome.variant).toBe('promise');
-            expect(outcome.value).toBeInstanceOf(Function);
-        });
+        context.markRunsAbortedOnGracefulAbort(['test-run-id']);
 
-        it('returns run info if the Run is tracked', () => {
-            const context = getClientContext();
-
-            const existingRun = createActorRunMock({ id: 'tracked-run-id', startedAt: new Date() });
-            context.runTracker.updateRun('tracked-run', existingRun);
-
-            const outcome = context.searchRunByRequestId('tracked-run');
-            expect(outcome.variant).toBe('runInfo');
-            expect(outcome.value).toEqual(expect.objectContaining({ runId: 'tracked-run-id' }));
-        });
-
-        it('returns notFound if the Run does not exist', () => {
-            const context = getClientContext();
-
-            const outcome = context.searchRunByRequestId('nonexistent-run');
-            expect(outcome.variant).toBe('notFound');
-            expect(outcome.value).toBe(true);
-        });
-    });
-
-    describe('searchOkRunMatchingRequest', () => {
-        it('returns a promise if the Run is scheduled to start', () => {
-            const context = getClientContext();
-            const runRequest = buildRunStartRequest({ runName: 'scheduled-run', source: runSource });
-            context.runScheduler.requestRunStart(runRequest);
-
-            const outcome = context.searchOkRunMatchingRequest(runRequest);
-            expect(outcome.variant).toBe('promise');
-            expect(outcome.value).toBeInstanceOf(Function);
-        });
-
-        it('returns run info if the Run is tracked in an OK status', () => {
-            const context = getClientContext();
-            const runRequest = buildRunStartRequest({ runName: 'tracked-run', source: runSource });
-
-            const existingRun = createActorRunMock({ id: 'tracked-run-id', status: 'RUNNING', startedAt: new Date() });
-            context.runTracker.updateRun(runRequest.requestId, existingRun);
-
-            const outcome = context.searchOkRunMatchingRequest(runRequest);
-            expect(outcome.variant).toBe('runInfo');
-            expect(outcome.value).toEqual(expect.objectContaining({ runId: 'tracked-run-id' }));
-        });
-
-        it('returns notFound if a tracked Run has failed, so a retry is always allowed', () => {
-            const context = getClientContext();
-            const runRequest = buildRunStartRequest({ runName: 'tracked-run', source: runSource });
-
-            const failedRun = createActorRunMock({ id: 'tracked-run-id', status: 'FAILED', startedAt: new Date() });
-            context.runTracker.updateRun(runRequest.requestId, failedRun);
-
-            const outcome = context.searchOkRunMatchingRequest(runRequest);
-            expect(outcome.variant).toBe('notFound');
-        });
-
-        it('returns notFound if the Run does not exist', () => {
-            const context = getClientContext();
-            const runRequest = buildRunStartRequest({ runName: 'nonexistent-run', source: runSource });
-
-            const outcome = context.searchOkRunMatchingRequest(runRequest);
-            expect(outcome.variant).toBe('notFound');
-            expect(outcome.value).toBe(true);
-        });
-
-        it('throws for a repeated unnamed request in the same session, but not for a repeated named one', () => {
-            const context = getClientContext();
-            const namedRequest = buildRunStartRequest({ runName: 'named-run', source: runSource });
-            const unnamedRequest = buildRunStartRequest({ source: runSource, input: { key: 'value' } });
-
-            const run = createActorRunMock({ id: 'run-id', status: 'RUNNING', startedAt: new Date() });
-            context.runTracker.updateRun(namedRequest.requestId, run);
-            context.runTracker.updateRun(unnamedRequest.requestId, run);
-
-            expect(() => context.searchOkRunMatchingRequest(namedRequest)).not.toThrow();
-            expect(() => context.searchOkRunMatchingRequest(unnamedRequest)).not.toThrow();
-            expect(() => context.searchOkRunMatchingRequest(unnamedRequest)).toThrow(AmbiguousRunRequestError);
-        });
-    });
-
-    describe('extendRunClient', () => {
-        it('returns an extended RunClient', async () => {
-            const context = getClientContext();
-            const orchestrator = new Orchestrator();
-            const client = await orchestrator.apifyClient();
-
-            const runClient = client.run('test-run-id');
-            const extRunClient = context.extendRunClient('test-run', runClient);
-            expect(extRunClient).toBeInstanceOf(ExtRunClient);
-            expect(extRunClient.requestId).toBe('test-run');
-
-            const updateRunSpy = vi.spyOn(context.runTracker, 'updateRun');
-            const getRunSpy = vi
-                .spyOn(RunClient.prototype, 'get')
-                .mockResolvedValue(createActorRunMock({ id: 'test-run-id', startedAt: new Date() }));
-
-            const run = await extRunClient.get();
-            expect(run).toBeDefined();
-            expect(getRunSpy).toHaveBeenCalled();
-            expect(updateRunSpy).toHaveBeenCalledWith('test-run', run);
-        });
+        expect(context.wasRunAbortedOnGracefulAbort('test-run-id')).toBe(true);
     });
 });

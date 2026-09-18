@@ -13,7 +13,6 @@ import type {
     SplitRules,
 } from '../types.js';
 import { isDefined } from '../utils/typing.js';
-import type { ExtApifyClient } from './apify-client.js';
 import type { ExtRunClient } from './run-client.js';
 
 export class ExtActorClient extends ActorClient implements ExtendedActorClient {
@@ -25,22 +24,20 @@ export class ExtActorClient extends ActorClient implements ExtendedActorClient {
     });
 
     private readonly context: ClientContext;
-    override apifyClient: ExtApifyClient;
 
     /**
      * @internal
      */
-    constructor(context: ClientContext, apifyClient: ExtApifyClient, actorClient: ActorClient) {
+    constructor(context: ClientContext, actorClient: ActorClient) {
         super({
             baseUrl: actorClient.baseUrl,
             publicBaseUrl: actorClient.publicBaseUrl,
-            apifyClient,
+            apifyClient: context.client,
             httpClient: actorClient.httpClient,
             id: actorClient.id,
             params: actorClient.params,
         });
         this.context = context;
-        this.apifyClient = apifyClient;
     }
 
     enqueue(...runRequests: ActorRunRequest[]): string[] {
@@ -51,7 +48,7 @@ export class ExtActorClient extends ActorClient implements ExtendedActorClient {
                 input: runRequest.input,
                 options: runRequest.options,
             });
-            this.apifyClient.findOrRequestRunStart(runStartRequest);
+            this.context.findOrRequestRunStart(runStartRequest);
             return runStartRequest.requestId;
         });
     }
@@ -80,7 +77,7 @@ export class ExtActorClient extends ActorClient implements ExtendedActorClient {
      */
     override async start(input?: object, options?: ExtendedActorStartOptions): Promise<ExtendedActorRun> {
         const { runName, ...startOptions } = options ?? {};
-        return this.apifyClient.findOrStartRun(
+        return this.context.findOrStartRun(
             buildRunStartRequest({
                 source: this.runSource,
                 runName,
@@ -104,12 +101,12 @@ export class ExtActorClient extends ActorClient implements ExtendedActorClient {
         // FIXME: the `log` option is not supported because we are not using `super.call()`.
         if (log) this.context.logger.warning('The `log` option is not supported yet in the Orchestrator.');
         const startedRun = await this.start(input, startOptions);
-        return this.apifyClient.extendedRunClient(startedRun.requestId, startedRun.id).waitForFinish({ waitSecs });
+        return this.context.extendRunClient(startedRun.requestId, startedRun.id).waitForFinish({ waitSecs });
     }
 
     override lastRun(options?: ActorLastRunOptions): RunClient | ExtRunClient {
         const runClient = super.lastRun(options);
-        return isDefined(runClient.id) ? this.apifyClient.run(runClient.id) : runClient;
+        return isDefined(runClient.id) ? this.context.client.run(runClient.id) : runClient;
     }
 
     async startRuns(...runRequests: ActorRunRequest[]): Promise<ExtendedActorRun[]> {

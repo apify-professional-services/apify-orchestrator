@@ -1,3 +1,5 @@
+import type { ActorRun } from 'apify-client';
+
 /**
  * Keeps track of the Runs that the Orchestrator itself aborted, because the Actor was gracefully aborted
  * and the `abortAllRunsOnGracefulAbort` option was enabled.
@@ -30,5 +32,14 @@ export class GracefulAbortTracker {
      */
     wasRunAborted(runId: string): boolean {
         return this.abortedRunIds.has(runId);
+    }
+
+    /**
+     * A Run is considered aborted by the Orchestrator if it is aborted, or being aborted,
+     * and the Orchestrator marked it as one of the Runs it aborted on a graceful abort.
+     */
+    wasAbortedOnGracefulAbort(run: ActorRun): boolean {
+        if (run.status !== 'ABORTED' && run.status !== 'ABORTING') return false;
+        return this.wasRunAborted(run.id);
     }
 }

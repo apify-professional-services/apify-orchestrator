@@ -9,7 +9,7 @@ import type { RunSource } from '../entities/run-source.js';
 import { buildRunStartRequest } from '../entities/run-start-request.js';
 import type { OrchestratorOptions } from '../types.js';
 import type { ExtActorClient } from './actor-client.js';
-import { ExtApifyClient } from './apify-client.js';
+import type { ExtApifyClient } from './apify-client.js';
 import { ExtRunClient } from './run-client.js';
 
 describe('ExtActorClient', () => {
@@ -30,13 +30,13 @@ describe('ExtActorClient', () => {
 
     function setUpClients(overrideOptions?: Partial<OrchestratorOptions>) {
         context = getClientContext(overrideOptions);
-        apifyClient = new ExtApifyClient('test-client', context, {});
+        apifyClient = context.client;
 
-        vi.spyOn(apifyClient, 'findOrRequestRunStart').mockImplementation((request) => {
+        vi.spyOn(context, 'findOrRequestRunStart').mockImplementation((request) => {
             const requestId = request.runName || 'default-request-id';
             return async () => createActorRunMock({ ...mockRun, requestId });
         });
-        vi.spyOn(apifyClient, 'findOrStartRun').mockImplementation(async (request) => {
+        vi.spyOn(context, 'findOrStartRun').mockImplementation(async (request) => {
             const requestId = request.runName || 'default-request-id';
             return createActorRunMock({ ...mockRun, requestId });
         });
@@ -67,7 +67,7 @@ describe('ExtActorClient', () => {
             const result = actorClient.enqueue(...runRequests);
 
             expect(result).toEqual(['test-run-1']);
-            expect(apifyClient.findOrRequestRunStart).toHaveBeenCalledWith({
+            expect(context.findOrRequestRunStart).toHaveBeenCalledWith({
                 source: runSource,
                 requestId: 'test-run-1',
                 runName: 'test-run-1',
@@ -94,7 +94,7 @@ describe('ExtActorClient', () => {
             const result = actorClient.enqueue({ input });
 
             const expectedRunStartRequest = buildRunStartRequest({ source: runSource, runName: undefined, input });
-            expect(apifyClient.findOrRequestRunStart).toHaveBeenCalledWith(expectedRunStartRequest);
+            expect(context.findOrRequestRunStart).toHaveBeenCalledWith(expectedRunStartRequest);
             expect(result).toEqual([expectedRunStartRequest.requestId]);
         });
     });
@@ -117,7 +117,7 @@ describe('ExtActorClient', () => {
         it('starts a single Run', async () => {
             const result = await actorClient.start({ key: 'value1' }, { runName: 'test-run-1' });
 
-            expect(apifyClient.findOrStartRun).toHaveBeenCalledWith(
+            expect(context.findOrStartRun).toHaveBeenCalledWith(
                 expect.objectContaining({
                     source: runSource,
                     runName: 'test-run-1',
@@ -133,7 +133,7 @@ describe('ExtActorClient', () => {
         it('generates a request ID if runName is not provided', async () => {
             const result = await actorClient.start({ key: 'value1' });
 
-            expect(apifyClient.findOrStartRun).toHaveBeenCalledWith(
+            expect(context.findOrStartRun).toHaveBeenCalledWith(
                 expect.objectContaining({
                     source: runSource,
                     runName: undefined,
@@ -161,7 +161,7 @@ describe('ExtActorClient', () => {
 
             const result = await actorClient.call({ key: 'value1' }, { runName: 'test-run-1' });
 
-            expect(apifyClient.findOrStartRun).toHaveBeenCalledWith({
+            expect(context.findOrStartRun).toHaveBeenCalledWith({
                 source: runSource,
                 requestId: 'test-run-1',
                 runName: 'test-run-1',
@@ -183,7 +183,7 @@ describe('ExtActorClient', () => {
 
             await actorClient.call({ key: 'value1' }, { runName: 'test-run-1', waitSecs: 30, memory: 1024 });
 
-            expect(apifyClient.findOrStartRun).toHaveBeenCalledWith({
+            expect(context.findOrStartRun).toHaveBeenCalledWith({
                 source: runSource,
                 requestId: 'test-run-1',
                 runName: 'test-run-1',
@@ -214,7 +214,7 @@ describe('ExtActorClient', () => {
         it('never returns when the Run is aborted by the Orchestrator on graceful abort', async () => {
             const abortedRunMock = createActorRunMock({ ...mockRun, requestId: 'test-run-1', status: 'ABORTED' });
             vi.spyOn(RunClient.prototype, 'waitForFinish').mockResolvedValue(abortedRunMock);
-            context.gracefulAbortTracker.markRunsAborted(['mock-run-id']);
+            context.markRunsAbortedOnGracefulAbort(['mock-run-id']);
 
             await expect(isStillPending(actorClient.call({ key: 'value1' }, { runName: 'test-run-1' }))).resolves.toBe(
                 true,
@@ -225,7 +225,7 @@ describe('ExtActorClient', () => {
             setUpClients({ returnAbortedRunsOnGracefulAbort: true });
             const abortedRunMock = createActorRunMock({ ...mockRun, requestId: 'test-run-1', status: 'ABORTED' });
             vi.spyOn(RunClient.prototype, 'waitForFinish').mockResolvedValue(abortedRunMock);
-            context.gracefulAbortTracker.markRunsAborted(['mock-run-id']);
+            context.markRunsAbortedOnGracefulAbort(['mock-run-id']);
 
             const run = await actorClient.call({ key: 'value1' }, { runName: 'test-run-1' });
 
@@ -300,7 +300,7 @@ describe('ExtActorClient', () => {
 
             const result = await actorClient.startBatch('batch-test', sources, inputGenerator);
 
-            expect(apifyClient.findOrStartRun).toHaveBeenCalled();
+            expect(context.findOrStartRun).toHaveBeenCalled();
             expect(result).toEqual([createActorRunMock({ ...mockRun, requestId: 'batch-test' })]);
         });
 
@@ -310,7 +310,7 @@ describe('ExtActorClient', () => {
 
             const result = await actorClient.startBatch('batch-test', sources, inputGenerator);
 
-            expect(apifyClient.findOrStartRun).toHaveBeenCalled();
+            expect(context.findOrStartRun).toHaveBeenCalled();
             expect(result).toEqual([
                 createActorRunMock({ ...mockRun, requestId: 'batch-test-1/2' }),
                 createActorRunMock({ ...mockRun, requestId: 'batch-test-2/2' }),
@@ -360,7 +360,7 @@ describe('ExtActorClient', () => {
 
             const result = await actorClient.callBatch('batch-test', sources, inputGenerator);
 
-            expect(apifyClient.findOrStartRun).toHaveBeenCalled();
+            expect(context.findOrStartRun).toHaveBeenCalled();
             expect(waitForFinishSpy).toHaveBeenCalled();
             expect(result).toEqual([finishedRun]);
         });

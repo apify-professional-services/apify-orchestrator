@@ -6,7 +6,6 @@ import { getClientContext } from '../__unit__/context.js';
 import { createActorRunMock } from '../__unit__/mocks.js';
 import type { ClientContext } from '../context/client-context.js';
 import type { OrchestratorOptions } from '../types.js';
-import { ExtApifyClient } from './apify-client.js';
 import type { ExtRunClient } from './run-client.js';
 
 describe('ExtRunClient', () => {
@@ -29,9 +28,8 @@ describe('ExtRunClient', () => {
 
     function buildRunClient(overrideOptions?: Partial<OrchestratorOptions>): ExtRunClient {
         context = getClientContext(overrideOptions);
-        const client = new ExtApifyClient('test-client', context, {});
         vi.spyOn(context.runTracker, 'updateRun');
-        return client.extendedRunClient('test-run', 'test-run-id');
+        return context.extendRunClient('test-run', 'test-run-id');
     }
 
     beforeEach(() => {
@@ -52,7 +50,7 @@ describe('ExtRunClient', () => {
         });
 
         it('flags a Run aborted by the Orchestrator on graceful abort', async () => {
-            context.gracefulAbortTracker.markRunsAborted(['test-run-id']);
+            context.markRunsAbortedOnGracefulAbort(['test-run-id']);
             vi.spyOn(RunClient.prototype, 'get').mockResolvedValue(abortedMockRun);
 
             const run = await runClient.get();
@@ -70,7 +68,7 @@ describe('ExtRunClient', () => {
         });
 
         it('does not flag a replacement Run started with the same request ID', async () => {
-            context.gracefulAbortTracker.markRunsAborted(['test-run-id']);
+            context.markRunsAbortedOnGracefulAbort(['test-run-id']);
             vi.spyOn(RunClient.prototype, 'get').mockResolvedValue(
                 createActorRunMock({ ...abortedMockRun, id: 'replacement-run-id' }),
             );
@@ -160,7 +158,7 @@ describe('ExtRunClient', () => {
         });
 
         it('never returns when the Run was aborted by the Orchestrator on graceful abort', async () => {
-            context.gracefulAbortTracker.markRunsAborted(['test-run-id']);
+            context.markRunsAbortedOnGracefulAbort(['test-run-id']);
             vi.spyOn(RunClient.prototype, 'waitForFinish').mockResolvedValue(abortedMockRun);
 
             await expect(isStillPending(runClient.waitForFinish())).resolves.toBe(true);
@@ -173,7 +171,7 @@ describe('ExtRunClient', () => {
         });
 
         it('never returns when the Run is being aborted by the Orchestrator on graceful abort', async () => {
-            context.gracefulAbortTracker.markRunsAborted(['test-run-id']);
+            context.markRunsAbortedOnGracefulAbort(['test-run-id']);
             vi.spyOn(RunClient.prototype, 'waitForFinish').mockResolvedValue(
                 createActorRunMock({ ...abortedMockRun, status: 'ABORTING' }),
             );
@@ -183,7 +181,7 @@ describe('ExtRunClient', () => {
 
         it('returns a flagged Run aborted by the Orchestrator if `returnAbortedRunsOnGracefulAbort` is enabled', async () => {
             runClient = buildRunClient({ returnAbortedRunsOnGracefulAbort: true });
-            context.gracefulAbortTracker.markRunsAborted(['test-run-id']);
+            context.markRunsAbortedOnGracefulAbort(['test-run-id']);
             vi.spyOn(RunClient.prototype, 'waitForFinish').mockResolvedValue(abortedMockRun);
 
             const run = await runClient.waitForFinish();
@@ -192,7 +190,7 @@ describe('ExtRunClient', () => {
         });
 
         it('returns a Run that did not finish yet, even during a graceful abort', async () => {
-            context.gracefulAbortTracker.markRunsAborted(['test-run-id']);
+            context.markRunsAbortedOnGracefulAbort(['test-run-id']);
             vi.spyOn(RunClient.prototype, 'waitForFinish').mockResolvedValue(mockRun);
 
             const run = await runClient.waitForFinish({ waitSecs: 1 });
