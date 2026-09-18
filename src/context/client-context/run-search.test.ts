@@ -1,4 +1,4 @@
-import { afterEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { getClientContext } from '../../__unit__/context.js';
 import { createActorRunMock } from '../../__unit__/mocks.js';
@@ -14,6 +14,10 @@ describe('run search', () => {
         id: 'test-actor',
         start: startRun,
         defaultMemoryMbytes,
+    });
+
+    beforeEach(() => {
+        vi.useFakeTimers();
     });
 
     afterEach(() => {
