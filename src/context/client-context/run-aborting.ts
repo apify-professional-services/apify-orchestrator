@@ -19,19 +19,19 @@ export async function abortAllRuns(context: ClientContext): Promise<void> {
 
 export async function abortAllRunsOnGracefulAbort(context: ClientContext): Promise<void> {
     const currentRuns = context.runTracker.getCurrentRuns();
-    const abortedRunIds = Object.values(currentRuns)
+    const abortedRuns: { [requestId: string]: RunInfo } = Object.entries(currentRuns)
         // A Run that already finished or is shutting down is not being aborted by the Orchestrator.
-        .filter((runInfo) => !isRunTerminalStatus(runInfo.status) && isRunOkStatus(runInfo.status))
-        .map((runInfo) => runInfo.runId);
+        .filter(([_requestId, runInfo]) => !isRunTerminalStatus(runInfo.status) && isRunOkStatus(runInfo.status))
+        .reduce((acc, [requestId, runInfo]) => ({ ...acc, [requestId]: runInfo }), {});
     // The Runs must be marked before being aborted, to avoid a race with any `waitForFinish` in progress.
-    context.markRunsAbortedOnGracefulAbort(abortedRunIds);
-    await abortRuns(context, currentRuns);
+    context.markRunsAbortedOnGracefulAbort(Object.values(abortedRuns).map((runInfo) => runInfo.runId));
+    await abortRuns(context, abortedRuns);
 }
 
-async function abortRuns(context: ClientContext, currentRuns: { [requestId: string]: RunInfo }): Promise<void> {
-    context.logger.info('Aborting Runs', { currentRunNames: Object.keys(currentRuns) });
+async function abortRuns(context: ClientContext, runsToAbort: { [requestId: string]: RunInfo }): Promise<void> {
+    context.logger.info('Aborting Runs', { currentRunNames: Object.keys(runsToAbort) });
     await Promise.all(
-        Object.entries(currentRuns).map(async ([requestId, runInfo]) => {
+        Object.entries(runsToAbort).map(async ([requestId, runInfo]) => {
             const runClient = context.extendRunClient(requestId, runInfo.runId);
             context.logger.prefixed(requestId).info('Aborting Run', {}, { url: runInfo.runUrl });
             await runClient.abort().catch((error) => {

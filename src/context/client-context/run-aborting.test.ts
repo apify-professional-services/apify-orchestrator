@@ -55,6 +55,36 @@ describe('run aborting on graceful abort', () => {
         expect(context.wasRunAbortedOnGracefulAbort('run-2-id')).toBe(true);
     });
 
+    it('only aborts Runs that are in progress and not shutting down', async () => {
+        context.runTracker.updateRun(
+            'running-run',
+            createActorRunMock({ id: 'running-run-id', status: 'RUNNING', startedAt: new Date() }),
+        );
+        context.runTracker.updateRun(
+            'ready-run',
+            createActorRunMock({ id: 'ready-run-id', status: 'READY', startedAt: new Date() }),
+        );
+        context.runTracker.updateRun(
+            'succeeded-run',
+            createActorRunMock({ id: 'succeeded-run-id', status: 'SUCCEEDED', startedAt: new Date() }),
+        );
+        context.runTracker.updateRun(
+            'aborting-run',
+            createActorRunMock({ id: 'aborting-run-id', status: 'ABORTING', startedAt: new Date() }),
+        );
+        const extendRunClientSpy = vi.spyOn(context, 'extendRunClient');
+        const abortSpy = vi
+            .spyOn(RunClient.prototype, 'abort')
+            .mockResolvedValue(createActorRunMock({ status: 'ABORTED', startedAt: new Date() }));
+
+        await context.abortAllRunsOnGracefulAbort();
+
+        expect(extendRunClientSpy).toHaveBeenCalledTimes(2);
+        expect(extendRunClientSpy).toHaveBeenCalledWith('running-run', 'running-run-id');
+        expect(extendRunClientSpy).toHaveBeenCalledWith('ready-run', 'ready-run-id');
+        expect(abortSpy).toHaveBeenCalledTimes(2);
+    });
+
     it('does not mark the Runs that already finished', async () => {
         context.runTracker.updateRun(
             'succeeded-run',
