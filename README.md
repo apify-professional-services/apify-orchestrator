@@ -38,6 +38,8 @@ Most of the following features are opt-in: you can use just the ones you need.
 
 - Automatic **resources' management**: start a Run when there is enough memory and Actor jobs available on the selected account.
 
+- Limit **how many Runs** a client keeps in progress at the same time _(opt-in)_.
+
 - Store the Runs in progress in the Key Value Store and **resume** them after a resurrection, avoiding starting a new, redundant Run.
 
 - Abort all the Runs in progress, triggered by the orchestrator, when the latter is gracefully aborted _(opt-in)_.\
@@ -175,6 +177,31 @@ if (run.abortedOnGracefulAbort) {
 
 If you disable `abortAllRunsOnGracefulAbort`, none of this applies: the external Runs keep going, and the methods
 waiting for them are killed abruptly, together with your Actor.
+
+## Limiting the number of concurrent Runs
+
+By default, a client starts a Run as soon as the account it uses has enough resources for it.
+If you want to keep the number of Runs in progress under a fixed threshold, set `maxConcurrentRuns` on the client:
+
+```js
+const orchestrator = new Orchestrator();
+const client = await orchestrator.apifyClient({ maxConcurrentRuns: 2 });
+
+// Only two of these Runs are in progress at any given time: the others are started as the first ones finish.
+const runs = await client
+    .actor(actorId)
+    .callRuns(
+        { runName: 'job-a', input: inputA },
+        { runName: 'job-b', input: inputB },
+        { runName: 'job-c', input: inputC },
+        { runName: 'job-d', input: inputD },
+    );
+```
+
+A Run counts towards the limit from the moment it is started until it reaches a terminal status, whether it succeeded
+or not. When the limit is reached, the requests to start new Runs simply stay in the scheduler's queue, and the
+scheduler starts them as soon as some of the Runs in progress finish: `enqueue` still returns immediately, while the
+methods that wait for a Run, such as `start` and `call`, wait longer, until their Run can be started.
 
 ## Avoiding ambiguous Run requests
 

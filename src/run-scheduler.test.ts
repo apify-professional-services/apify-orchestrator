@@ -1,14 +1,16 @@
 import { Actor } from 'apify';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
+import { isStillPending } from './__unit__/async.js';
 import { getClientContext, getTestOptions } from './__unit__/context.js';
 import { createActorRunMock, createMockRunSource } from './__unit__/mocks.js';
 import { MAIN_LOOP_INTERVAL_MS } from './constants.js';
 import type { ClientContext } from './context/client-context.js';
+import type { RunSource } from './entities/run-source.js';
 import type { RunStartRequest } from './entities/run-start-request.js';
 import { InsufficientMemoryError } from './errors.js';
 import { RunScheduler } from './run-scheduler.js';
-import type { OrchestratorOptions } from './types.js';
+import type { ExtendedClientOptions, OrchestratorOptions } from './types.js';
 import * as trySync from './utils/concurrency/try-sync.js';
 
 function getAttemptProcessingAllRequests(runScheduler: RunScheduler) {
@@ -26,8 +28,11 @@ describe('RunScheduler', () => {
         startedAt: new Date('2024-01-01T00:00:00.000Z'),
     });
 
-    function buildRunScheduler(overrideOptions?: Partial<OrchestratorOptions>) {
-        context = getClientContext(getTestOptions({ retryOnInsufficientResources: true, ...overrideOptions }));
+    function buildRunScheduler(overrideOptions?: Partial<OrchestratorOptions>, clientOptions?: ExtendedClientOptions) {
+        context = getClientContext(
+            getTestOptions({ retryOnInsufficientResources: true, ...overrideOptions }),
+            clientOptions,
+        );
         return context.runScheduler;
     }
 
@@ -174,6 +179,107 @@ describe('RunScheduler', () => {
 
         await expect(runScheduler.startRun(runRequest)).rejects.toThrow('Failed to start run');
         expect(mockSource.start).toHaveBeenCalledTimes(1);
+    });
+
+    describe('maxConcurrentRuns', () => {
+        function buildRunRequests(source: RunSource, count: number): RunStartRequest[] {
+            return Array.from({ length: count }, (_value, index) => ({
+                source,
+                requestId: `run-${index + 1}`,
+                runName: `run-${index + 1}`,
+                input: { key: `value${index + 1}` },
+            }));
+        }
+
+        it('starts all the Runs when no limit is set', async () => {
+            const runScheduler = buildRunScheduler();
+            const mockSource = createMockRunSource(runMock);
+
+            for (const runRequest of buildRunRequests(mockSource, 3)) {
+                runScheduler.requestRunStart(runRequest);
+            }
+
+            await getAttemptProcessingAllRequests(runScheduler)();
+
+            expect(mockSource.start).toHaveBeenCalledTimes(3);
+        });
+
+        it('does not start more Runs than the limit allows', async () => {
+            const runScheduler = buildRunScheduler(undefined, { maxConcurrentRuns: 2 });
+            const mockSource = createMockRunSource(runMock);
+
+            for (const runRequest of buildRunRequests(mockSource, 3)) {
+                runScheduler.requestRunStart(runRequest);
+            }
+
+            await getAttemptProcessingAllRequests(runScheduler)();
+
+            expect(mockSource.start).toHaveBeenCalledTimes(2);
+            expect(context.runTracker.getActiveRunCount()).toBe(2);
+            expect(mockSource.start).not.toHaveBeenCalledWith({ key: 'value3' }, undefined);
+        });
+
+        it('starts the pending Runs as the Runs in progress finish', async () => {
+            const runScheduler = buildRunScheduler(undefined, { maxConcurrentRuns: 1 });
+            const mockSource = createMockRunSource(runMock);
+
+            for (const runRequest of buildRunRequests(mockSource, 2)) {
+                runScheduler.requestRunStart(runRequest);
+            }
+
+            const attemptProcessingAllRequests = getAttemptProcessingAllRequests(runScheduler);
+
+            await attemptProcessingAllRequests();
+            expect(mockSource.start).toHaveBeenCalledTimes(1);
+            expect(mockSource.start).toHaveBeenCalledWith({ key: 'value1' }, undefined);
+
+            // The slot is still taken: the second Run is not started yet.
+            await attemptProcessingAllRequests();
+            expect(mockSource.start).toHaveBeenCalledTimes(1);
+
+            // The first Run finished: its slot is now free.
+            context.trackRunUpdate('run-1', createActorRunMock({ id: 'test-run-id', status: 'SUCCEEDED' }));
+            expect(context.runTracker.getActiveRunCount()).toBe(0);
+
+            await attemptProcessingAllRequests();
+            expect(mockSource.start).toHaveBeenCalledTimes(2);
+            expect(mockSource.start).toHaveBeenCalledWith({ key: 'value2' }, undefined);
+        });
+
+        it('waits for a free slot when starting a Run immediately', async () => {
+            const runScheduler = buildRunScheduler(undefined, { maxConcurrentRuns: 1 });
+            const mockSource = createMockRunSource(runMock);
+
+            // A Run started outside of the scheduler already takes the only available slot.
+            context.trackRunUpdate('external-run', createActorRunMock({ id: 'external-run-id', status: 'RUNNING' }));
+
+            const [runRequest] = buildRunRequests(mockSource, 1);
+            const startPromise = runScheduler.startRun(runRequest);
+
+            // The immediate attempt is blocked by the limit: the request stays pending, waiting for the next tick.
+            expect(await isStillPending(startPromise)).toBe(true);
+            expect(mockSource.start).not.toHaveBeenCalled();
+            expect(runScheduler.findRunStartRequest('run-1')).toBeDefined();
+
+            // Once the slot is free, the next tick starts the Run.
+            context.trackRunUpdate('external-run', createActorRunMock({ id: 'external-run-id', status: 'SUCCEEDED' }));
+            await getAttemptProcessingAllRequests(runScheduler)();
+
+            await expect(startPromise).resolves.toEqual(expect.objectContaining({ id: 'test-run-id' }));
+            expect(mockSource.start).toHaveBeenCalledTimes(1);
+        });
+
+        it('never starts a Run when the limit is zero', async () => {
+            const runScheduler = buildRunScheduler(undefined, { maxConcurrentRuns: 0 });
+            const mockSource = createMockRunSource(runMock);
+
+            const [runRequest] = buildRunRequests(mockSource, 1);
+            runScheduler.requestRunStart(runRequest);
+
+            await getAttemptProcessingAllRequests(runScheduler)();
+
+            expect(mockSource.start).not.toHaveBeenCalled();
+        });
     });
 
     describe('attemptProcessingAllRequests', () => {

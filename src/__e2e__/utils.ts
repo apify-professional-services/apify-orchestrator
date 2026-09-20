@@ -1,6 +1,6 @@
 import { Actor, log } from 'apify';
 
-import type { ExtendedApifyClient, OrchestratorOptions } from '../index.js';
+import type { ExtendedApifyClient, ExtendedClientOptions, OrchestratorOptions } from '../index.js';
 import { Orchestrator } from '../index.js';
 import { TestActorRunner } from './test-actor-runner.js';
 
@@ -26,9 +26,10 @@ export interface OrchestratorAndClient {
 
 export async function getOrchestratorAndClient(
     orchestratorOptions: Partial<OrchestratorOptions>,
+    clientOptions?: ExtendedClientOptions,
 ): Promise<OrchestratorAndClient> {
     const orchestrator = new Orchestrator(orchestratorOptions);
-    const client = await orchestrator.apifyClient();
+    const client = await orchestrator.apifyClient(clientOptions);
     testCounter++;
     return { orchestrator, client, testIndex: testCounter };
 }

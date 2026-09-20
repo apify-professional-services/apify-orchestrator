@@ -189,6 +189,22 @@
   was aborted by a user.
 - New `AmbiguousRunRequestError` (a subclass of `OrchestratorError`), thrown when the same
   auto-generated request ID is resolved twice in the same process with no resurrection in between - check the README for more insights.
+- New `maxConcurrentRuns` client option (no limit by default): it caps the number of Runs that the client keeps in
+  progress at the same time - check the README for more insights.
+
+    ```ts
+    const orchestrator = new Orchestrator();
+    const client = await orchestrator.apifyClient({ maxConcurrentRuns: 2 });
+
+    // Only two of these Runs are in progress at any given time.
+    const runs = await client
+        .actor(actorId)
+        .callRuns(
+            { runName: 'job-a', input: inputA },
+            { runName: 'job-b', input: inputB },
+            { runName: 'job-c', input: inputC },
+        );
+    ```
 
 ### Fixed
 

@@ -183,4 +183,65 @@ describe('RunTracker', async () => {
             ],
         });
     });
+
+    describe('getActiveRunCount', () => {
+        function buildTracker() {
+            return new RunTracker(context, { current: {}, failedHistory: {} });
+        }
+
+        it('counts no Run when none is tracked', () => {
+            const tracker = buildTracker();
+
+            expect(tracker.getActiveRunCount()).toBe(0);
+        });
+
+        it('counts the Runs in progress', () => {
+            const tracker = buildTracker();
+
+            tracker.updateRun('ready-run', createActorRunMock({ id: 'ready-run-id', status: 'READY' }));
+            tracker.updateRun('running-run', createActorRunMock({ id: 'running-run-id', status: 'RUNNING' }));
+
+            expect(tracker.getActiveRunCount()).toBe(2);
+        });
+
+        it('counts the Runs which are shutting down', () => {
+            const tracker = buildTracker();
+
+            tracker.updateRun('aborting-run', createActorRunMock({ id: 'aborting-run-id', status: 'ABORTING' }));
+            tracker.updateRun('timing-out-run', createActorRunMock({ id: 'timing-out-run-id', status: 'TIMING-OUT' }));
+
+            expect(tracker.getActiveRunCount()).toBe(2);
+        });
+
+        it('does not count the Runs in a terminal status', () => {
+            const tracker = buildTracker();
+
+            for (const status of ['SUCCEEDED', 'FAILED', 'ABORTED', 'TIMED-OUT'] as const) {
+                tracker.updateRun(`${status}-run`, createActorRunMock({ id: `${status}-run-id`, status }));
+            }
+            tracker.updateRun('running-run', createActorRunMock({ id: 'running-run-id', status: 'RUNNING' }));
+
+            expect(tracker.getActiveRunCount()).toBe(1);
+        });
+
+        it('stops counting a Run once it finishes', () => {
+            const tracker = buildTracker();
+
+            tracker.updateRun('test-run', createActorRunMock({ id: 'test-run-id', status: 'RUNNING' }));
+            expect(tracker.getActiveRunCount()).toBe(1);
+
+            tracker.updateRun('test-run', createActorRunMock({ id: 'test-run-id', status: 'SUCCEEDED' }));
+            expect(tracker.getActiveRunCount()).toBe(0);
+        });
+
+        it('stops counting a Run which was lost', () => {
+            const tracker = buildTracker();
+
+            tracker.updateRun('lost-run', createActorRunMock({ id: 'lost-run-id', status: 'RUNNING' }));
+            expect(tracker.getActiveRunCount()).toBe(1);
+
+            tracker.updateRun('lost-run', undefined);
+            expect(tracker.getActiveRunCount()).toBe(0);
+        });
+    });
 });

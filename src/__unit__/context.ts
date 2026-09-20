@@ -1,11 +1,9 @@
-import type { ApifyClientOptions } from 'apify-client';
-
 import { ExtApifyClient } from '../clients/apify-client.js';
 import type { ClientContext } from '../context/client-context.js';
 import { generateClientContext } from '../context/client-context.js';
 import type { OrchestratorContext } from '../context/orchestrator-context.js';
 import { generateOrchestratorContext } from '../context/orchestrator-context.js';
-import type { OrchestratorOptions } from '../types.js';
+import type { ExtendedClientOptions, OrchestratorOptions } from '../types.js';
 
 const DEFAULT_TEST_OPTIONS: OrchestratorOptions = {
     enableLogs: false,
@@ -31,9 +29,10 @@ export function getTestContext(overrideOptions?: Partial<OrchestratorOptions>): 
  */
 export function getClientContext(
     overrideOptions?: Partial<OrchestratorOptions>,
-    clientOptions: ApifyClientOptions = {},
+    clientOptions: ExtendedClientOptions = {},
 ): ClientContext {
     const orchestratorContext = getTestContext(overrideOptions);
+    const { name, maxConcurrentRuns, ...superClientOptions } = clientOptions;
 
     // Create empty tracked runs for testing
     const trackedRuns = {
@@ -42,8 +41,9 @@ export function getClientContext(
     };
 
     return generateClientContext(orchestratorContext, {
-        clientName: 'test-client',
+        clientName: name ?? 'test-client',
         trackedRuns,
-        createClient: (context) => new ExtApifyClient(context, clientOptions),
+        maxConcurrentRuns,
+        createClient: (context) => new ExtApifyClient(context, superClientOptions),
     });
 }

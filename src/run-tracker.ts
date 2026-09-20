@@ -2,7 +2,7 @@ import type { ActorRun } from 'apify-client';
 
 import type { ClientContext } from './context/client-context.js';
 import type { ExtendedActorRun, RunInfo } from './types.js';
-import { isRunFailStatus } from './utils/apify-client.js';
+import { isRunFailStatus, isRunTerminalStatus } from './utils/apify-client.js';
 import { getRunUrl } from './utils/apify-console.js';
 
 type RunInfoRecord = { [requestId: string]: RunInfo };
@@ -24,6 +24,14 @@ export class RunTracker {
 
     getCurrentRuns(): { [requestId: string]: RunInfo } {
         return cloneRunInfoRecord(this.trackedRuns.current);
+    }
+
+    /**
+     * @returns the number of Runs which are currently in progress, including the ones that are shutting down,
+     * such as the Runs in an `ABORTING` or `TIMING-OUT` status: they still occupy the account's resources.
+     */
+    getActiveRunCount(): number {
+        return Object.values(this.trackedRuns.current).filter(({ status }) => !isRunTerminalStatus(status)).length;
     }
 
     findRunByRequestId(requestId: string): RunInfo | undefined {

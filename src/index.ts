@@ -37,7 +37,7 @@ export class Orchestrator implements ApifyOrchestrator {
     }
 
     async apifyClient(options: ExtendedClientOptions = {}): Promise<ExtendedApifyClient> {
-        const { name, ...superClientOptions } = options;
+        const { name, maxConcurrentRuns, ...superClientOptions } = options;
 
         const clientName = makeNameUnique(name ?? 'CLIENT', takenClientNames);
         takenClientNames.add(clientName);
@@ -58,6 +58,7 @@ export class Orchestrator implements ApifyOrchestrator {
         const clientContext = generateClientContext(this.context, {
             clientName,
             trackedRuns,
+            maxConcurrentRuns,
             createClient: (context) => new ExtApifyClient(context, superClientOptions),
         });
 

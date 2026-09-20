@@ -2,6 +2,7 @@ import { log } from 'apify';
 
 import type { TrackedRuns } from '../run-tracker.js';
 import { childRunNeverReturnedOnGracefulAbort, childRunReturnedOnGracefulAbort } from './graceful-abort.js';
+import { childRunsLimitedByMaxConcurrentRuns } from './max-concurrent-runs.js';
 import { checkResurrectionTestOutputCompleteness, runResurrectionTest } from './resurrection.js';
 import { TestTransientTaskRunner } from './transient-task-runner.js';
 import type { TestResult } from './types.js';
@@ -15,6 +16,7 @@ export async function runEndToEndTestSuite(): Promise<EndToEndTestOutput> {
         childRunWithPlainPersistence,
         childRunWithEncryptedPersistence,
         childRunFromTask,
+        childRunsLimitedByMaxConcurrentRuns,
         resurrectedRunWithoutPersistence,
         resurrectedRunWithPlainPersistence,
         resurrectedRunWithEncryptedPersistence,

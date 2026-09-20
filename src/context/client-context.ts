@@ -25,6 +25,11 @@ export interface ClientContextOptions {
     clientName: string;
 
     /**
+     * The maximum number of Runs this client may have in progress at the same time. No limit, if undefined.
+     */
+    maxConcurrentRuns?: number;
+
+    /**
      * The Run state this context tracks. It may be persisted, and therefore restored after a resurrection.
      */
     trackedRuns: TrackedRuns;
@@ -44,6 +49,11 @@ export interface ClientContextOptions {
  */
 export interface ClientContext extends OrchestratorContext {
     readonly clientName: string;
+
+    /**
+     * The maximum number of Runs this client may have in progress at the same time. No limit, if undefined.
+     */
+    readonly maxConcurrentRuns?: number;
 
     /**
      * The client this context belongs to.
@@ -135,7 +145,7 @@ export interface ClientContext extends OrchestratorContext {
 
 export function generateClientContext(
     orchestratorContext: OrchestratorContext,
-    { clientName, trackedRuns, createClient }: ClientContextOptions,
+    { clientName, trackedRuns, maxConcurrentRuns, createClient }: ClientContextOptions,
 ): ClientContext {
     // These members are built after the context itself, and exposed through the getters below.
     let runTracker: RunTracker | undefined;
@@ -151,6 +161,7 @@ export function generateClientContext(
     const context: ClientContext = {
         ...orchestratorContext,
         clientName,
+        maxConcurrentRuns,
 
         get client(): ExtApifyClient {
             return requireInitialized(client, 'client');
