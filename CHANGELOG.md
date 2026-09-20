@@ -206,6 +206,10 @@
         );
     ```
 
+- New `lastUpdatedAt` property on the `RunInfo` objects, reported by the `onUpdate` callback and persisted in the Key
+  Value Store: it tells when the Orchestrator last observed the Run's status. The Runs restored from a version of the
+  Orchestrator which did not record it are treated as never updated, and their `lastUpdatedAt` is the Unix epoch.
+
 ### Fixed
 
 - When calling `ExtendedActorClient`'s method `call` passing the `log` option, a warning is now logged to inform that the option is not supported yet in the Orchestrator. The support may be introduced in a future release.

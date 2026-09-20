@@ -203,6 +203,11 @@ or not. When the limit is reached, the requests to start new Runs simply stay in
 scheduler starts them as soon as some of the Runs in progress finish: `enqueue` still returns immediately, while the
 methods that wait for a Run, such as `start` and `call`, wait longer, until their Run can be started.
 
+The Orchestrator normally notices that a Run finished while waiting for it, for instance through `call`,
+`waitForFinish`, or `waitForBatchFinish`. A Run nobody waits for would hold its slot forever: to avoid it, whenever
+the limit blocks a Run start, the Runs which were not updated in the last minute are polled, and the ones which
+finished release their slot.
+
 ## Avoiding ambiguous Run requests
 
 Every `start`/`call`/`enqueue` request is identified by a request ID: either the `runName` you provide, or, if you omit

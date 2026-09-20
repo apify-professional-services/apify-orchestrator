@@ -1,10 +1,11 @@
 import { Actor } from 'apify';
+import { RunClient } from 'apify-client';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { isStillPending } from './__unit__/async.js';
 import { getClientContext, getTestOptions } from './__unit__/context.js';
 import { createActorRunMock, createMockRunSource } from './__unit__/mocks.js';
-import { MAIN_LOOP_INTERVAL_MS } from './constants.js';
+import { MAIN_LOOP_INTERVAL_MS, RUN_STALENESS_THRESHOLD_MS } from './constants.js';
 import type { ClientContext } from './context/client-context.js';
 import type { RunSource } from './entities/run-source.js';
 import type { RunStartRequest } from './entities/run-start-request.js';
@@ -267,6 +268,86 @@ describe('RunScheduler', () => {
 
             await expect(startPromise).resolves.toEqual(expect.objectContaining({ id: 'test-run-id' }));
             expect(mockSource.start).toHaveBeenCalledTimes(1);
+        });
+
+        describe('stale Runs', () => {
+            const now = new Date('2024-06-01T12:00:00.000Z');
+
+            /**
+             * Tracks a Run nobody is waiting for, which takes a slot, and whose status was updated long ago.
+             */
+            function trackStaleRun(requestId: string, runId: string) {
+                context.trackRunUpdate(requestId, createActorRunMock({ id: runId, status: 'RUNNING' }));
+                vi.setSystemTime(new Date(Date.now() + RUN_STALENESS_THRESHOLD_MS));
+            }
+
+            beforeEach(() => {
+                vi.useFakeTimers();
+                vi.setSystemTime(now);
+            });
+
+            afterEach(() => {
+                vi.restoreAllMocks();
+                vi.useRealTimers();
+            });
+
+            it('refreshes the stale Runs when the limit blocks a Run start', async () => {
+                const runScheduler = buildRunScheduler(undefined, { maxConcurrentRuns: 1 });
+                const mockSource = createMockRunSource(runMock);
+
+                trackStaleRun('stale-run', 'stale-run-id');
+                const refreshSpy = vi.spyOn(context, 'refreshStaleRuns').mockResolvedValue();
+
+                const [runRequest] = buildRunRequests(mockSource, 1);
+                runScheduler.requestRunStart(runRequest);
+
+                await getAttemptProcessingAllRequests(runScheduler)();
+
+                expect(refreshSpy).toHaveBeenCalledTimes(1);
+                expect(mockSource.start).not.toHaveBeenCalled();
+            });
+
+            it('does not refresh the stale Runs when the limit is not reached', async () => {
+                const runScheduler = buildRunScheduler(undefined, { maxConcurrentRuns: 2 });
+                const mockSource = createMockRunSource(runMock);
+
+                trackStaleRun('stale-run', 'stale-run-id');
+                const refreshSpy = vi.spyOn(context, 'refreshStaleRuns').mockResolvedValue();
+
+                const [runRequest] = buildRunRequests(mockSource, 1);
+                runScheduler.requestRunStart(runRequest);
+
+                await getAttemptProcessingAllRequests(runScheduler)();
+
+                expect(refreshSpy).not.toHaveBeenCalled();
+                expect(mockSource.start).toHaveBeenCalledTimes(1);
+            });
+
+            it('starts the pending Run when the refresh frees a slot', async () => {
+                const runScheduler = buildRunScheduler(undefined, { maxConcurrentRuns: 1 });
+                const mockSource = createMockRunSource(runMock);
+
+                trackStaleRun('stale-run', 'stale-run-id');
+
+                // The platform reports that the stale Run has actually finished already.
+                vi.spyOn(RunClient.prototype, 'get').mockResolvedValue(
+                    createActorRunMock({ id: 'stale-run-id', status: 'SUCCEEDED' }),
+                );
+
+                const [runRequest] = buildRunRequests(mockSource, 1);
+                runScheduler.requestRunStart(runRequest);
+
+                const attemptProcessingAllRequests = getAttemptProcessingAllRequests(runScheduler);
+
+                // The limit blocks this attempt, but the stale Run is updated, and its slot is freed.
+                await attemptProcessingAllRequests();
+                expect(mockSource.start).not.toHaveBeenCalled();
+                expect(context.runTracker.getActiveRunCount()).toBe(0);
+
+                // The next attempt finds a free slot.
+                await attemptProcessingAllRequests();
+                expect(mockSource.start).toHaveBeenCalledTimes(1);
+            });
         });
 
         it('never starts a Run when the limit is zero', async () => {

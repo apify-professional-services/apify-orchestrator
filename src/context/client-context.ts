@@ -117,6 +117,15 @@ export interface ClientContext extends OrchestratorContext {
     trackRunUpdate(requestId: string, run?: ExtendedActorRun): void;
 
     /**
+     * Checks the status of the Runs which are supposedly in progress, but were not observed recently.
+     *
+     * The Orchestrator only notices that a Run finished when it observes its status, which normally happens
+     * while waiting for it: if nobody waits for a Run, a Run which already finished would hold its slot
+     * in the concurrent Runs limit forever, preventing the pending Runs from ever starting.
+     */
+    refreshStaleRuns(): Promise<void>;
+
+    /**
      * Aborts all the Runs currently tracked by this client, without marking them as aborted on a graceful abort.
      */
     abortAllRuns(): Promise<void>;
@@ -185,6 +194,7 @@ export function generateClientContext(
         extendRunClient: (requestId, runId) => runUpdates.extendRunClient(context, requestId, runId),
         buildExtendedRun: (requestId, run) => runUpdates.buildExtendedRun(gracefulAbortTracker, requestId, run),
         trackRunUpdate: (requestId, run) => runUpdates.trackRunUpdate(context, unnamedRequestTracker, requestId, run),
+        refreshStaleRuns: async () => runUpdates.refreshStaleRuns(context),
 
         abortAllRuns: async () => runAborting.abortAllRuns(context),
         abortAllRunsOnGracefulAbort: async () => runAborting.abortAllRunsOnGracefulAbort(context),

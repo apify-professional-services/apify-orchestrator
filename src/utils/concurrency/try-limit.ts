@@ -1,6 +1,11 @@
 import { type TrySync, TrySyncOutcome } from './try-sync.js';
 
 /**
+ * The reason reported by a `TryLimit` when it blocks the execution.
+ */
+export const LIMIT_REACHED_MESSAGE = 'limit-reached';
+
+/**
  * A synchronization primitive that allows executing a function only while some measured value
  * stays below a given limit, for instance, the number of Runs in progress, or the memory they use.
  *
@@ -25,7 +30,7 @@ export class TryLimit implements TrySync {
      * Runs the provided function only if the current value is below the limit.
      */
     async attempt<T>(fn: () => Promise<T>): Promise<TrySyncOutcome<T>> {
-        if (this.getCurrentValue() >= this.limit) return new TrySyncOutcome({ blocked: 'limit-reached' });
+        if (this.getCurrentValue() >= this.limit) return new TrySyncOutcome({ blocked: LIMIT_REACHED_MESSAGE });
         const result = await fn();
         return new TrySyncOutcome({ executed: result });
     }

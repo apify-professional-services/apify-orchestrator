@@ -1,5 +1,6 @@
 import type { ActorRun } from 'apify-client';
 
+import { NEVER_UPDATED_AT } from './constants.js';
 import type { ClientContext } from './context/client-context.js';
 import type { ExtendedActorRun, RunInfo } from './types.js';
 import { isRunFailStatus, isRunTerminalStatus } from './utils/apify-client.js';
@@ -19,6 +20,7 @@ export class RunTracker {
     constructor(context: ClientContext, trackedRuns: TrackedRuns) {
         this.context = context;
         this.trackedRuns = trackedRuns;
+        assignMissinglastUpdatedAt(trackedRuns);
         this.itemsChangedCallback();
     }
 
@@ -32,6 +34,31 @@ export class RunTracker {
      */
     getActiveRunCount(): number {
         return Object.values(this.trackedRuns.current).filter(({ status }) => !isRunTerminalStatus(status)).length;
+    }
+
+    /**
+     * @param stalenessThresholdMs how long a Run's observed status is considered up-to-date.
+     * @returns the Runs which are supposedly still in progress, but whose status was not updated recently:
+     * they may have finished without the Orchestrator noticing it.
+     */
+    getStaleRuns(stalenessThresholdMs: number): RunInfoRecord {
+        const oldestAcceptableUpdate = Date.now() - stalenessThresholdMs;
+        const staleRuns = Object.entries(this.trackedRuns.current).filter(
+            ([_requestId, { status, lastUpdatedAt }]) =>
+                !isRunTerminalStatus(status) && new Date(lastUpdatedAt).getTime() <= oldestAcceptableUpdate,
+        );
+        return cloneRunInfoRecord(Object.fromEntries(staleRuns));
+    }
+
+    /**
+     * Records that a Run's status was just updated, without changing anything else about it.
+     *
+     * It is used when an update could not be completed, to avoid polling the same Run over and over again.
+     */
+    markRunUpdated(requestId: string): void {
+        const runInfo = this.trackedRuns.current[requestId];
+        if (!runInfo) return;
+        runInfo.lastUpdatedAt = new Date().toISOString();
     }
 
     findRunByRequestId(requestId: string): RunInfo | undefined {
@@ -119,7 +146,23 @@ function buildRunInfo(run: ActorRun): RunInfo {
     const { id: runId, status, startedAt } = run;
     const runUrl = getRunUrl(runId);
     const formattedStartedAt = startedAt.toISOString();
-    return { runId, runUrl, status, startedAt: formattedStartedAt };
+    // The Run information comes from the platform: it is up-to-date, by definition.
+    const lastUpdatedAt = new Date().toISOString();
+    return { runId, runUrl, status, startedAt: formattedStartedAt, lastUpdatedAt };
+}
+
+/**
+ * The Runs persisted by a previous version of the Orchestrator have no `lastUpdatedAt`:
+ * they are treated as never updated, so that their status is refreshed as soon as it matters.
+ */
+function assignMissinglastUpdatedAt(trackedRuns: TrackedRuns): void {
+    const allRunInfos: Partial<RunInfo>[] = [
+        ...Object.values(trackedRuns.current),
+        ...Object.values(trackedRuns.failedHistory).flat(),
+    ];
+    for (const runInfo of allRunInfos) {
+        runInfo.lastUpdatedAt ??= NEVER_UPDATED_AT;
+    }
 }
 
 function hasRunChanged(existingRun: RunInfo | undefined, newRun: RunInfo): boolean {

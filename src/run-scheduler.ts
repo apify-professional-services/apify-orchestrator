@@ -6,7 +6,7 @@ import type { ExtendedActorRun } from './types.js';
 import { Interval } from './utils/concurrency/interval.js';
 import { TryCooldown } from './utils/concurrency/try-cooldown.js';
 import { TryGate } from './utils/concurrency/try-gate.js';
-import { TryLimit } from './utils/concurrency/try-limit.js';
+import { LIMIT_REACHED_MESSAGE, TryLimit } from './utils/concurrency/try-limit.js';
 import { TryLock } from './utils/concurrency/try-lock.js';
 import { synchronizedAttempt } from './utils/concurrency/try-sync.js';
 import { mergeDictionaries } from './utils/dictionaries.js';
@@ -108,9 +108,16 @@ export class RunScheduler {
                     // Check for shutdown, retry cooldown, and Run count limit between each request.
                     [this.shutdownGate, this.retryCooldown, this.runCountLimit],
                 );
-                const requestProcessed = syncOutcome.match({ executed: () => true, blocked: () => false });
+                const blockedBy = syncOutcome.match<string | undefined>({
+                    executed: () => undefined,
+                    blocked: (reason) => reason,
+                });
                 // If we get blocked by a synchronizer, we stop processing further requests in this attempt.
-                if (!requestProcessed) break;
+                if (blockedBy) {
+                    // The limit may be held by Runs which already finished, but nobody checked on them.
+                    if (blockedBy === LIMIT_REACHED_MESSAGE) await this.context.refreshStaleRuns();
+                    break;
+                }
             }
         });
     }

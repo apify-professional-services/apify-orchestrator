@@ -639,4 +639,5 @@ export interface RunInfo {
     runUrl: string;
     status: RunStatus;
     startedAt: string;
+    lastUpdatedAt: string;
 }
