@@ -10,6 +10,7 @@ import type { ApifyOrchestrator, ExtendedApifyClient, ExtendedClientOptions, Orc
 import { makeNameUnique, makePrefixUnique } from './utils/naming.js';
 import type { Storage } from './utils/storage.js';
 import { buildStorage } from './utils/storage.js';
+import { isDefined } from './utils/typing.js';
 
 export * from './constants.js';
 export * from './types.js';
@@ -38,6 +39,9 @@ export class Orchestrator implements ApifyOrchestrator {
 
     async apifyClient(options: ExtendedClientOptions = {}): Promise<ExtendedApifyClient> {
         const { name, maxConcurrentRuns, ...superClientOptions } = options;
+        if (isDefined(maxConcurrentRuns) && maxConcurrentRuns <= 0) {
+            throw new Error('maxConcurrentRuns must be a positive number');
+        }
 
         const clientName = makeNameUnique(name ?? 'CLIENT', takenClientNames);
         takenClientNames.add(clientName);
