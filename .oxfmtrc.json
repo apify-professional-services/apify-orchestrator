@@ -1,0 +1,23 @@
+{
+    "$schema": "./node_modules/oxfmt/configuration_schema.json",
+    "printWidth": 120,
+    "singleQuote": true,
+    "sortPackageJson": false,
+    "ignorePatterns": ["dist", "storage", "temp", "__fixtures__", "templates"],
+    "sortImports": {
+        "groups": [
+            ["type-import", "value-builtin", "value-external"],
+            [
+                "type-internal",
+                "value-internal",
+                "type-parent",
+                "value-parent",
+                "type-sibling",
+                "value-sibling",
+                "type-index",
+                "value-index"
+            ],
+            "unknown"
+        ]
+    }
+}

@@ -1,6 +1,7 @@
 // This file contains all the public type definitions for the Apify Orchestrator package.
 // Private types should go elsewhere.
 
+import { ACTOR_JOB_STATUSES } from '@apify/consts';
 import type {
     ActorCallOptions,
     ActorClient,
@@ -13,11 +14,14 @@ import type {
     DatasetClientListItemOptions,
     Dictionary,
     RunClient,
+    RunWaitForFinishOptions,
     TaskCallOptions,
     TaskClient,
     TaskLastRunOptions,
     TaskStartOptions,
 } from 'apify-client';
+
+import { FAIL_STATUSES, OK_STATUSES, ORCHESTRATOR_RUN_JOB_STATUSES, TERMINAL_STATUSES } from './constants.js';
 
 export interface OrchestratorOptions {
     /**
@@ -38,7 +42,7 @@ export interface OrchestratorOptions {
     /**
      * A callback which is called every time the Orchestrator's status is updated.
      *
-     * The callback takes as input a record having Run names as keys, and Run information as values.
+     * The callback takes as input a record having Run request IDs as keys, and Run information as values.
      */
     onUpdate?: UpdateCallback;
 
@@ -88,9 +92,35 @@ export interface OrchestratorOptions {
      * Notice that, if disabled, a function that is waiting for a Run to finish
      * may not notice when the orchestrator is aborted and will be killed abruptly.
      *
+     * When enabled, by default the methods waiting for one of those Runs, such as `call` and `waitForFinish`,
+     * never return: they hang until the process is killed, to prevent the execution of subsequent code after a Run is
+     * aborted by the Orchestrator. Set `returnAbortedRunsOnGracefulAbort` to change this behavior.
+     *
      * @default true
      */
     abortAllRunsOnGracefulAbort: boolean;
+
+    /**
+     * Return the Runs aborted by the Orchestrator on graceful abort, instead of hanging forever.
+     *
+     * When the Orchestrator aborts the Runs in progress on a graceful abort (see `abortAllRunsOnGracefulAbort`),
+     * the methods waiting for one of those Runs, such as `call` and `waitForFinish`, would resolve with an
+     * `ABORTED` Run, which is indistinguishable from a Run aborted by a user.
+     *
+     * If you enable this option, those methods return the aborted Run, with its `abortedOnGracefulAbort` flag
+     * set to `true`, so that you can tell the two cases apart and handle them yourself.
+     *
+     * **WARNING**: by default, this option is disabled, which means that the methods waiting for a Run aborted
+     * by the Orchestrator on a graceful abort **never return**: they hang until the Actor's process is killed,
+     * at the end of the graceful abort timeout. This is intended: your code is being shut down anyway, and it
+     * avoids executing the logic you would run after a successful Run.
+     * Enable this option only if you need to perform some clean-up after your Runs have been aborted.
+     *
+     * This option has no effect if `abortAllRunsOnGracefulAbort` is disabled.
+     *
+     * @default false
+     */
+    returnAbortedRunsOnGracefulAbort: boolean;
 
     /**
      * Whether to automatically retry failed (due to lack of memory/jobs) operations.
@@ -115,14 +145,6 @@ export interface ApifyOrchestrator {
      * @returns the `ScheduledApifyClient` object
      */
     apifyClient: (options?: ExtendedClientOptions) => Promise<ExtendedApifyClient>;
-
-    /**
-     * Group some datasets together, to be able to read all their items at one time.
-     *
-     * @param datasets the dataset clients, generated with `ExtendedApifyClient.dataset`
-     * @returns an object representing group of merged datasets
-     */
-    mergeDatasets: <T extends DatasetItem>(...datasets: ExtendedDatasetClient<T>[]) => DatasetGroup<T>;
 }
 
 export type ExtendedClientOptions = ApifyClientOptions & {
@@ -130,6 +152,13 @@ export type ExtendedClientOptions = ApifyClientOptions & {
      * Used to identify a client, for instance, when storing its Runs in the Key Value Store.
      */
     name?: string;
+
+    /**
+     * The maximum number of Runs that this client may have in progress at the same time.
+     *
+     * @default undefined (no limit)
+     */
+    maxConcurrentRuns?: number;
 };
 
 /**
@@ -156,32 +185,53 @@ export interface ExtendedApifyClient extends ApifyClient {
     dataset: <T extends DatasetItem>(id: string) => ExtendedDatasetClient<T>;
 
     /**
-     * @returns a Run client corresponding to the given name, if it exists
+     * @param requestIdOrRunName the request ID returned by `enqueue`, for example, or the run name of your choice
+     * @returns a Run client corresponding to the given request ID or Run name, if it exists
      */
-    runByName: (name: string) => Promise<ExtendedRunClient | undefined>;
+    runByRequest: (requestIdOrRunName: string) => Promise<ExtendedRunClient | undefined>;
 
     /**
-     * @returns an ActorRun object corresponding to the given name, if it exists
+     * @param requestIdOrRunName the request ID returned by `enqueue`, for example, or the run name of your choice
+     * @returns an ExtendedActorRun object corresponding to the given request ID or Run name, if it exists
      */
-    actorRunByName: (name: string) => Promise<ActorRun | undefined>;
+    actorRunByRequest: (requestIdOrRunName: string) => Promise<ExtendedActorRun | undefined>;
 
     /**
-     * Searches for the Runs with the given names an generates a `RunRecord` with them.
+     * Searches for the Runs with the given request IDs or Run names.
+     *
+     * @param requestIdsOrRunNames the request IDs returned by `enqueue`, for example, or the run names of your choice
+     * @returns the `ExtendedActorRun` objects of the Runs that were found
      */
-    runRecord: (...runNames: string[]) => Promise<RunRecord>;
+    actorRunsByRequest: (...requestIdsOrRunNames: string[]) => Promise<ExtendedActorRun[]>;
 
     /**
      * Waits for one or more Runs previously started.
      *
-     * @param batch a `RunRecord` object or a list of names
-     * @returns an updated `RunRecord`
+     * **NOTE**: if the Orchestrator aborts one of the Runs because the Actor was gracefully aborted
+     * (see the `abortAllRunsOnGracefulAbort` option), this method does not return: it hangs until the process is
+     * killed, unless the `returnAbortedRunsOnGracefulAbort` option is enabled, in which case it returns the aborted
+     * Runs, with their `abortedOnGracefulAbort` flag set to `true`.
+     *
+     * @param batch an array of `ExtendedActorRun` objects or a list of request IDs or Run names
+     * @returns the updated `ExtendedActorRun` objects
      */
-    waitForBatchFinish: (batch: RunRecord | string[]) => Promise<RunRecord>;
+    waitForBatchFinish: (batch: ExtendedActorRun[] | string[]) => Promise<ExtendedActorRun[]>;
 
     /**
      * Stop all the Runs in progress started from this client.
+     *
+     * If you are currently waiting for any of the Runs to finish, those methods will return them with their status set
+     * to `ABORTED`, but without the `abortedOnGracefulAbort` flag.
      */
     abortAllRuns: () => Promise<void>;
+}
+
+export interface ExtendedActorStartOptions extends ActorStartOptions {
+    runName?: string;
+}
+
+export interface ExtendedActorCallOptions extends ActorCallOptions {
+    runName?: string;
 }
 
 /**
@@ -194,7 +244,7 @@ export interface ExtendedActorClient extends ActorClient {
      * Enqueues one or more requests for new Runs, and return immediately.
      *
      * @param runRequests the requests
-     * @returns the future names of the Runs
+     * @returns the future request IDs of the Runs
      */
     enqueue: (...runRequests: ActorRunRequest[]) => string[];
 
@@ -221,12 +271,12 @@ export interface ExtendedActorClient extends ActorClient {
     /**
      * @override
      */
-    start: (runName: string, input?: object, options?: ActorStartOptions) => Promise<ActorRun>;
+    start: (input?: object, options?: ExtendedActorStartOptions) => Promise<ExtendedActorRun>;
 
     /**
      * Starts one or more Runs, based on an array of requests.
      */
-    startRuns: (...runRequests: ActorRunRequest[]) => Promise<RunRecord>;
+    startRuns: (...runRequests: ActorRunRequest[]) => Promise<ExtendedActorRun[]>;
 
     /**
      * Starts one or more requests for new Runs, given the parameters to generate input batches.
@@ -238,7 +288,7 @@ export interface ExtendedActorClient extends ActorClient {
      * @param inputGenerator the function used to generate the input batches
      * @param overrideSplitRules the rules for splitting
      * @param options the options for starting the Runs
-     * @returns the future names of the Runs
+     * @returns the started Runs
      */
     startBatch: <T>(
         namePrefix: string,
@@ -246,17 +296,27 @@ export interface ExtendedActorClient extends ActorClient {
         inputGenerator: (chunk: T[]) => Dictionary,
         overrideSplitRules?: Partial<SplitRules>,
         options?: ActorStartOptions,
-    ) => Promise<RunRecord>;
+    ) => Promise<ExtendedActorRun[]>;
 
     /**
+     * **NOTE**: if the Orchestrator aborts the Run because the Actor was gracefully aborted
+     * (see the `abortAllRunsOnGracefulAbort` option), this method does not return: it hangs until the process is
+     * killed, unless the `returnAbortedRunsOnGracefulAbort` option is enabled, in which case it returns the aborted
+     * Run, with its `abortedOnGracefulAbort` flag set to `true`.
+     *
      * @override
      */
-    call: (runName: string, input?: object, options?: ActorCallOptions) => Promise<ActorRun>;
+    call: (input?: object, options?: ExtendedActorCallOptions) => Promise<ExtendedActorRun>;
 
     /**
      * Starts and waits for one or more Runs, based on an array of requests.
+     *
+     * **NOTE**: if the Orchestrator aborts one of the Runs because the Actor was gracefully aborted
+     * (see the `abortAllRunsOnGracefulAbort` option), this method does not return: it hangs until the process is
+     * killed, unless the `returnAbortedRunsOnGracefulAbort` option is enabled, in which case it returns the aborted
+     * Runs, with their `abortedOnGracefulAbort` flag set to `true`.
      */
-    callRuns: (...runRequests: ActorRunRequest[]) => Promise<RunRecord>;
+    callRuns: (...runRequests: ActorRunRequest[]) => Promise<ExtendedActorRun[]>;
 
     /**
      * Starts and waits for one or more requests for new Runs, given the parameters to generate input batches.
@@ -268,7 +328,12 @@ export interface ExtendedActorClient extends ActorClient {
      * @param inputGenerator the function used to generate the input batches
      * @param overrideSplitRules the rules for splitting
      * @param options the options for starting the Runs
-     * @returns the future names of the Runs
+     * @returns the finished Runs
+     *
+     * **NOTE**: if the Orchestrator aborts one of the Runs because the Actor was gracefully aborted
+     * (see the `abortAllRunsOnGracefulAbort` option), this method does not return: it hangs until the process is
+     * killed, unless the `returnAbortedRunsOnGracefulAbort` option is enabled, in which case it returns the aborted
+     * Runs, with their `abortedOnGracefulAbort` flag set to `true`.
      */
     callBatch: <T>(
         namePrefix: string,
@@ -276,7 +341,7 @@ export interface ExtendedActorClient extends ActorClient {
         inputGenerator: (chunk: T[]) => Dictionary,
         overrideSplitRules?: Partial<SplitRules>,
         options?: ActorStartOptions,
-    ) => Promise<RunRecord>;
+    ) => Promise<ExtendedActorRun[]>;
 
     /**
      * If it finds the Run it in the Runs records, it returns a `TrackedRunClient` instead of a `RunClient`,
@@ -285,6 +350,14 @@ export interface ExtendedActorClient extends ActorClient {
      * @override
      */
     lastRun: (options?: ActorLastRunOptions) => RunClient | ExtendedRunClient;
+}
+
+export interface ExtendedTaskStartOptions extends TaskStartOptions {
+    runName?: string;
+}
+
+export interface ExtendedTaskCallOptions extends TaskCallOptions {
+    runName?: string;
 }
 
 /**
@@ -297,7 +370,7 @@ export interface ExtendedTaskClient extends TaskClient {
      * Enqueues one or more requests for new Runs, and return immediately.
      *
      * @param runRequests the requests
-     * @returns the future names of the Runs
+     * @returns the future request IDs of the Runs
      */
     enqueue: (...runRequests: ActorRunRequest[]) => string[];
 
@@ -311,7 +384,7 @@ export interface ExtendedTaskClient extends TaskClient {
      * @param inputGenerator the function used to generate the input batches
      * @param overrideSplitRules the rules for splitting
      * @param options the options for starting the Runs
-     * @returns the future names of the Runs
+     * @returns the future request IDs of the Runs
      */
     enqueueBatch: <T>(
         namePrefix: string,
@@ -324,12 +397,12 @@ export interface ExtendedTaskClient extends TaskClient {
     /**
      * @override
      */
-    start: (input?: Dictionary, options?: TaskStartOptions & { runName: string }) => Promise<ActorRun>;
+    start: (input?: Dictionary, options?: ExtendedTaskStartOptions) => Promise<ExtendedActorRun>;
 
     /**
      * Starts one or more Runs, based on an array of requests.
      */
-    startRuns: (...runRequests: TaskRunRequest[]) => Promise<RunRecord>;
+    startRuns: (...runRequests: TaskRunRequest[]) => Promise<ExtendedActorRun[]>;
 
     /**
      * Starts one or more requests for new Runs, given the parameters to generate input batches.
@@ -341,7 +414,7 @@ export interface ExtendedTaskClient extends TaskClient {
      * @param inputGenerator the function used to generate the input batches
      * @param overrideSplitRules the rules for splitting
      * @param options the options for starting the Runs
-     * @returns the future names of the Runs
+     * @returns the started Runs
      */
     startBatch: <T>(
         namePrefix: string,
@@ -349,17 +422,27 @@ export interface ExtendedTaskClient extends TaskClient {
         inputGenerator: (chunk: T[]) => Dictionary,
         overrideSplitRules?: Partial<SplitRules>,
         options?: TaskStartOptions,
-    ) => Promise<RunRecord>;
+    ) => Promise<ExtendedActorRun[]>;
 
     /**
+     * **NOTE**: if the Orchestrator aborts the Run because the Actor was gracefully aborted
+     * (see the `abortAllRunsOnGracefulAbort` option), this method does not return: it hangs until the process is
+     * killed, unless the `returnAbortedRunsOnGracefulAbort` option is enabled, in which case it returns the aborted
+     * Run, with its `abortedOnGracefulAbort` flag set to `true`.
+     *
      * @override
      */
-    call: (input?: Dictionary, options?: TaskCallOptions & { runName: string }) => Promise<ActorRun>;
+    call: (input?: Dictionary, options?: ExtendedTaskCallOptions) => Promise<ExtendedActorRun>;
 
     /**
      * Starts and waits for one or more Runs, based on an array of requests.
+     *
+     * **NOTE**: if the Orchestrator aborts one of the Runs because the Actor was gracefully aborted
+     * (see the `abortAllRunsOnGracefulAbort` option), this method does not return: it hangs until the process is
+     * killed, unless the `returnAbortedRunsOnGracefulAbort` option is enabled, in which case it returns the aborted
+     * Runs, with their `abortedOnGracefulAbort` flag set to `true`.
      */
-    callRuns: (...runRequests: TaskRunRequest[]) => Promise<RunRecord>;
+    callRuns: (...runRequests: TaskRunRequest[]) => Promise<ExtendedActorRun[]>;
 
     /**
      * Starts and waits for one or more requests for new Runs, given the parameters to generate input batches.
@@ -371,7 +454,12 @@ export interface ExtendedTaskClient extends TaskClient {
      * @param inputGenerator the function used to generate the input batches
      * @param overrideSplitRules the rules for splitting
      * @param options the options for starting the Runs
-     * @returns the future names of the Runs
+     * @returns the finished Runs
+     *
+     * **NOTE**: if the Orchestrator aborts one of the Runs because the Actor was gracefully aborted
+     * (see the `abortAllRunsOnGracefulAbort` option), this method does not return: it hangs until the process is
+     * killed, unless the `returnAbortedRunsOnGracefulAbort` option is enabled, in which case it returns the aborted
+     * Runs, with their `abortedOnGracefulAbort` flag set to `true`.
      */
     callBatch: <T>(
         namePrefix: string,
@@ -379,7 +467,7 @@ export interface ExtendedTaskClient extends TaskClient {
         inputGenerator: (chunk: T[]) => Dictionary,
         overrideSplitRules?: Partial<SplitRules>,
         options?: TaskStartOptions,
-    ) => Promise<RunRecord>;
+    ) => Promise<ExtendedActorRun[]>;
 
     /**
      * If it finds the Run it in the Runs records, it returns a `TrackedRunClient` instead of a `RunClient`,
@@ -395,7 +483,19 @@ export interface ExtendedTaskClient extends TaskClient {
  *
  * @extends RunClient
  */
-export type ExtendedRunClient = RunClient;
+export interface ExtendedRunClient extends RunClient {
+    /**
+     * Waits for the Run to finish.
+     *
+     * **NOTE**: if the Orchestrator aborts the Run because the Actor was gracefully aborted
+     * (see the `abortAllRunsOnGracefulAbort` option), this method does not return: it hangs until the process is
+     * killed, unless the `returnAbortedRunsOnGracefulAbort` option is enabled, in which case it returns the aborted
+     * Run, with its `abortedOnGracefulAbort` flag set to `true`.
+     *
+     * @override
+     */
+    waitForFinish: (options?: RunWaitForFinishOptions) => Promise<ExtendedActorRun>;
+}
 
 /**
  * A Dataset client allowing to iterate over the items in the dataset, automatically paginated.
@@ -404,67 +504,30 @@ export type ExtendedRunClient = RunClient;
  */
 export interface ExtendedDatasetClient<T extends DatasetItem> extends DatasetClient<T> {
     /**
-     * Iterates over the items in the dataset.
+     * Iterates over the items in the dataset as they become available, polling the run status
+     * at a regular interval and yielding any new items found at each poll.
      *
-     * The option `pageSize` will help avoiding the JavaScript's string limit when deserializing the content.
-     *
-     * @param options includes all the options in `DatasetClientListItemOptions` and `pageSize`
-     * @returns an `AsyncGenerator` which iterates the items in the dataset
-     *
-     * @example
-     * const datasetIterator = datasetClient.iterate({ pageSize: 100 });
-     * for await (const item of datasetIterator) {
-     *     console.log(item.title);
-     * }
-     */
-    iterate: (options: IterateOptions) => AsyncGenerator<T, void, void>;
-
-    /**
-     * Iterates over the items in the dataset. Fetches the items as soon as they are available
-     *
-     * The option `pageSize` will help avoiding the JavaScript's string limit when deserializing the content.
-     * The default value is 100 items.
-     *
-     * The option `itemsThreshold` will define the batch size of new items to trigger a fetch.
-     * Set to 0 to fetch any amount of new items as soon as they are available.
+     * The option `chunkSize` will help avoiding the JavaScript's string limit when deserializing the content.
      * The default value is 100 items.
      *
      * The option `pollIntervalSecs` allows customizing how frequently to call the API to check for new items.
      * The default value is 10 seconds.
      *
-     * ### Example
+     * Once the run reaches a terminal status, any remaining items are drained page-by-page until
+     * no more are returned.
      *
-     * With the default settings, this function will check every 10 seconds if at least 100 new items are available.
-     * If yes, it will read a "page" of 100 items from the dataset, then resume polling every 10 seconds.
-     * If the Run terminates, it will fetch all the remaining items using a pagination of 100 items.
+     * The dataset can only be traversed in ascending order, from oldest to newest items.
      *
-     * @param options includes all the options in `DatasetClientListItemOptions`, `pageSize`, `itemsThreshold`, and `pollIntervalSecs`
+     * @param options the greedy listing options, including `chunkSize` and `pollIntervalSecs`
      * @returns an `AsyncGenerator` which iterates the items in the dataset
      *
      * @example
-     * const datasetIterator = datasetClient.greedyIterate({ pageSize: 100 });
+     * const datasetIterator = datasetClient.greedyListItems({ chunkSize: 100 });
      * for await (const item of datasetIterator) {
      *     console.log(item.title);
      * }
      */
-    greedyIterate: (options: GreedyIterateOptions) => AsyncGenerator<T, void, void>;
-}
-
-export interface DatasetGroup<T extends DatasetItem> {
-    /**
-     * The dataset clients in this group.
-     */
-    readonly datasets: ExtendedDatasetClient<T>[];
-
-    /**
-     * Iterate over all the items from all the dataset, in order, at one time.
-     *
-     * The option `pageSize` will help avoiding the JavaScript's string limit when deserializing the content.
-     *
-     * @param options includes all the options in `DatasetClientListItemOptions` and `pageSize`
-     * @returns an `AsyncGenerator` which iterates the items in the datasets
-     */
-    iterate: (options: IterateOptions) => AsyncGenerator<T, void, void>;
+    greedyListItems: (options?: GreedyListItemsOptions) => AsyncGenerator<T, void, void>;
 }
 
 /**
@@ -477,7 +540,7 @@ export type PersistenceSupport = 'kvs' | 'none';
  * A request to be enqueued by the `QueuedActorClient`.
  */
 export interface ActorRunRequest {
-    runName: string;
+    runName?: string;
     input?: Dictionary;
     options?: ActorStartOptions;
 }
@@ -486,15 +549,28 @@ export interface ActorRunRequest {
  * A request to be enqueued by the `ExtTaskClient`.
  */
 export interface TaskRunRequest {
-    runName: string;
+    runName?: string;
     input?: Dictionary;
     options?: TaskStartOptions;
 }
 
-/**
- * A record of Runs, having their names as keys and their `ActorRun` objects as values.
- */
-export type RunRecord = Record<string, ActorRun>;
+export interface ExtendedActorRun extends ActorRun {
+    /**
+     * The ID of the request that started this Run: the `runName` provided by the user, or a generated hash.
+     */
+    requestId: string;
+
+    /**
+     * `true` if this Run was aborted by the Orchestrator because the Actor was gracefully aborted
+     * (see the `abortAllRunsOnGracefulAbort` option); `undefined` in any other case, including when the Run
+     * was aborted by a user.
+     *
+     * Notice that the methods waiting for a Run to finish, such as `call` and `waitForFinish`, return an
+     * `ExtendedActorRun` with this flag only if the `returnAbortedRunsOnGracefulAbort` option is enabled:
+     * otherwise, they never return.
+     */
+    abortedOnGracefulAbort?: true;
+}
 
 /**
  * A generic definition of a dataset item.
@@ -510,21 +586,16 @@ export type RunRecord = Record<string, ActorRun>;
  */
 export type DatasetItem = Record<string | number, unknown>;
 
-export type IterateOptions = DatasetClientListItemOptions & {
-    /**
-     * Value used for pagination. If omitted, all the items are downloaded together.
-     */
-    pageSize?: number;
-};
+/**
+ * Options for listing items from a dataset in ascending order, omitting the `desc` option.
+ */
+export type DatasetClientListSortedItemOptions = Omit<DatasetClientListItemOptions, 'desc'>;
 
-export type GreedyIterateOptions = IterateOptions & {
-    /**
-     * Download new items when they are more than the specified threshold, or when the Run terminates.\
-     * If zero, the new items are downloaded as soon as they are detected.
-     *
-     * @default 100
-     */
-    itemsThreshold?: number;
+/**
+ * Options for to greedily list items from a dataset, with automatic pagination and polling for new items.
+ * The dataset can only be traversed in ascending order, from oldest to newest items.
+ */
+export type GreedyListItemsOptions = DatasetClientListSortedItemOptions & {
     /**
      * Check the run's status regularly at the specified interval, in seconds.
      *
@@ -542,13 +613,31 @@ export interface SplitRules {
 
 export type UpdateCallback = (
     report: Record<string, RunInfo>,
-    lastChangedRunName?: string,
-    lastChangedRun?: ActorRun,
+    lastChangedRunRequestId?: string,
+    lastChangedRun?: ExtendedActorRun,
 ) => unknown;
+
+/**
+ * Represents the status of a Run job on the Apify platform (`act2Builds` and `act2Runs`).
+ */
+export type PlatformRunJobStatus = (typeof ACTOR_JOB_STATUSES)[keyof typeof ACTOR_JOB_STATUSES];
+/**
+ * Represents the status of a Run job that exists only within the orchestrator context.
+ */
+export type OrchestratorRunStatus = (typeof ORCHESTRATOR_RUN_JOB_STATUSES)[keyof typeof ORCHESTRATOR_RUN_JOB_STATUSES];
+/**
+ * Represents any kind of Run job status, whether it belongs to the Apify platform or exists only within the orchestrator context.
+ */
+export type RunStatus = PlatformRunJobStatus | OrchestratorRunStatus;
+
+export type RunOkStatus = (typeof OK_STATUSES)[number];
+export type RunFailStatus = (typeof FAIL_STATUSES)[number];
+export type RunTerminalStatus = (typeof TERMINAL_STATUSES)[number];
 
 export interface RunInfo {
     runId: string;
     runUrl: string;
-    status: string;
+    status: RunStatus;
     startedAt: string;
+    lastUpdatedAt: string;
 }

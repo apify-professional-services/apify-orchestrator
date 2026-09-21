@@ -5,21 +5,14 @@ import { DEFAULT_ORCHESTRATOR_OPTIONS } from './constants.js';
 import { generateClientContext } from './context/client-context.js';
 import type { OrchestratorContext } from './context/orchestrator-context.js';
 import { generateOrchestratorContext } from './context/orchestrator-context.js';
-import { DatasetGroupClass } from './entities/dataset-group.js';
 import type { TrackedRuns } from './run-tracker.js';
-import type {
-    ApifyOrchestrator,
-    DatasetGroup,
-    DatasetItem,
-    ExtendedApifyClient,
-    ExtendedClientOptions,
-    ExtendedDatasetClient,
-    OrchestratorOptions,
-} from './types.js';
+import type { ApifyOrchestrator, ExtendedApifyClient, ExtendedClientOptions, OrchestratorOptions } from './types.js';
 import { makeNameUnique, makePrefixUnique } from './utils/naming.js';
 import type { Storage } from './utils/storage.js';
 import { buildStorage } from './utils/storage.js';
+import { isDefined } from './utils/typing.js';
 
+export * from './constants.js';
 export * from './types.js';
 export * from './errors.js';
 
@@ -45,7 +38,10 @@ export class Orchestrator implements ApifyOrchestrator {
     }
 
     async apifyClient(options: ExtendedClientOptions = {}): Promise<ExtendedApifyClient> {
-        const { name, ...superClientOptions } = options;
+        const { name, maxConcurrentRuns, ...superClientOptions } = options;
+        if (isDefined(maxConcurrentRuns) && maxConcurrentRuns <= 0) {
+            throw new Error('maxConcurrentRuns must be a positive number');
+        }
 
         const clientName = makeNameUnique(name ?? 'CLIENT', takenClientNames);
         takenClientNames.add(clientName);
@@ -63,12 +59,13 @@ export class Orchestrator implements ApifyOrchestrator {
         const trackedRuns =
             (await this.storage?.useState<TrackedRuns>(storageKey, defaultTrackedRuns)) ?? defaultTrackedRuns;
 
-        const clientContext = generateClientContext(this.context, trackedRuns);
+        const clientContext = generateClientContext(this.context, {
+            clientName,
+            trackedRuns,
+            maxConcurrentRuns,
+            createClient: (context) => new ExtApifyClient(context, superClientOptions),
+        });
 
-        return new ExtApifyClient(clientName, clientContext, superClientOptions);
-    }
-
-    mergeDatasets<T extends DatasetItem>(...datasets: ExtendedDatasetClient<T>[]): DatasetGroup<T> {
-        return new DatasetGroupClass(...datasets);
+        return clientContext.client;
     }
 }

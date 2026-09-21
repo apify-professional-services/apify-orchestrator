@@ -27,3 +27,6 @@ apify_storage
 crawlee_storage
 storage
 .turbo
+
+# e2e test files
+apify-orchestrator-e2e-test-*

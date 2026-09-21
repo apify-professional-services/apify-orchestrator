@@ -4,16 +4,17 @@
         "module": "NodeNext",
         "moduleResolution": "NodeNext",
         "target": "ES2022",
+        "rootDir": "./src",
         "outDir": "dist",
+        "tsBuildInfoFile": "./dist/.tsbuildinfo",
         "noUnusedLocals": false,
         "skipLibCheck": true,
         "lib": ["DOM", "ES2021.String"],
         "erasableSyntaxOnly": true,
-        "baseUrl": ".",
         "paths": {
-            "apify-orchestrator": ["src"]
+            "apify-orchestrator": ["./src"]
         }
     },
-    "include": ["./src/**/*"],
+    "include": ["./src/**/*", "vitest.config.ts"],
     "exclude": ["**/node_modules", "**/dist", "**/coverage"]
 }

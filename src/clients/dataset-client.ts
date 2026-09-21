@@ -1,8 +1,17 @@
-import type { ActorRun, Dataset } from 'apify-client';
-import { DatasetClient } from 'apify-client';
+import { ActorRun, DatasetClient } from 'apify-client';
 
 import type { OrchestratorContext } from '../context/orchestrator-context.js';
-import type { DatasetItem, ExtendedDatasetClient, GreedyIterateOptions, IterateOptions } from '../types.js';
+import type {
+    DatasetClientListSortedItemOptions,
+    DatasetItem,
+    ExtendedDatasetClient,
+    GreedyListItemsOptions,
+} from '../types.js';
+import { isRunTerminalStatus } from '../utils/apify-client.js';
+import { isDefined } from '../utils/typing.js';
+
+const DEFAULT_CHUNK_SIZE = 100;
+const DEFAULT_POLL_INTERVAL_SECS = 10;
 
 export class ExtDatasetClient<T extends DatasetItem> extends DatasetClient<T> implements ExtendedDatasetClient<T> {
     private readonly context: OrchestratorContext;
@@ -22,98 +31,71 @@ export class ExtDatasetClient<T extends DatasetItem> extends DatasetClient<T> im
         this.context = context;
     }
 
-    async *iterate(options: IterateOptions = {}): AsyncGenerator<T, void, void> {
-        const { pageSize, ...listItemOptions } = options;
-        this.context.logger.info('Iterating Dataset', { pageSize }, { url: this.url });
-
-        let totalItems = 0;
-
-        if (pageSize) {
-            let offset = 0;
-            let currentPage = await super.listItems({ ...listItemOptions, offset, limit: pageSize });
-            while (currentPage.items.length > 0) {
-                totalItems += currentPage.items.length;
-                for (const item of currentPage.items) {
-                    yield item;
-                }
-
-                offset += pageSize;
-                currentPage = await super.listItems({ offset, limit: pageSize });
-            }
-        } else {
-            const itemList = await super.listItems(listItemOptions);
-            totalItems += itemList.items.length;
-            for (const item of itemList.items) {
-                yield item;
-            }
+    private async getAssociatedRun(): Promise<ActorRun | null> {
+        const dataset = await this.get();
+        if (!isDefined(dataset?.actRunId)) {
+            this.context.logger.error('Error getting Dataset while fetching run status', { id: this.id });
+            return null;
         }
 
-        this.context.logger.info('Finished reading dataset', { totalItems }, { url: this.url });
+        const run = await this.apifyClient.run(dataset.actRunId).get();
+        if (!isDefined(run)) {
+            this.context.logger.error('Error getting Run while fetching run status', { id: this.id });
+            return null;
+        }
+
+        return run;
     }
 
-    async *greedyIterate(options: GreedyIterateOptions = {}): AsyncGenerator<T, void, void> {
-        const { pageSize = 100, itemsThreshold = 100, pollIntervalSecs = 10, ...listItemOptions } = options;
-        this.context.logger.info('Greedily iterating Dataset', { pageSize }, { url: this.url });
+    private async listNextPage(options: DatasetClientListSortedItemOptions, readItemsCount: number) {
+        const { offset = 0, limit = 0, chunkSize = DEFAULT_CHUNK_SIZE } = options;
+        const pageSize = computeNextPageSize(limit, chunkSize, readItemsCount);
+        return super.listItems({
+            ...options,
+            offset: offset + readItemsCount,
+            limit: pageSize,
+        });
+    }
+
+    async *greedyListItems(options: GreedyListItemsOptions = {}): AsyncGenerator<T, void, void> {
+        const { pollIntervalSecs = DEFAULT_POLL_INTERVAL_SECS, ...listOptions } = options;
+        const { limit = 0, chunkSize = DEFAULT_CHUNK_SIZE } = listOptions;
+        this.context.logger.info('Greedily iterating Dataset', { chunkSize }, { url: this.url });
 
         let readItemsCount = 0;
+        let isRunFinished = false;
 
-        let dataset: Dataset | undefined;
-        let run: ActorRun | undefined;
-
-        // TODO: breaking change - remove itemsThreshold and just listItems at every iteration
+        // Poll the run status and fetch newly available items at each interval.
         while (true) {
-            dataset = await this.get();
-            if (!dataset || !dataset.actRunId) {
-                this.context.logger.error('Error getting Dataset while iterating greedily', { id: this.id });
-                return;
+            if (!isRunFinished) {
+                const run = await this.getAssociatedRun();
+                if (!isDefined(run)) return;
+                isRunFinished = isRunTerminalStatus(run.status);
             }
 
-            run = await this.apifyClient.run(dataset.actRunId).get();
-            if (!run) {
-                this.context.logger.error('Error getting Run while iterating Dataset greedily', { id: this.id });
-                return;
-            }
-
-            if (run.status !== 'READY' && run.status !== 'RUNNING') {
-                break;
-            }
-
-            if (dataset.itemCount >= readItemsCount + itemsThreshold) {
-                const itemList = await super.listItems({
-                    ...listItemOptions,
-                    offset: readItemsCount,
-                    limit: pageSize,
-                });
-                readItemsCount += itemList.count;
-                for (const item of itemList.items) {
-                    yield item;
-                }
-            }
-
-            await new Promise((resolve) => {
-                setTimeout(resolve, pollIntervalSecs * 1000);
-            });
-        }
-
-        dataset = await this.get();
-        if (!dataset || !dataset.actRunId) {
-            this.context.logger.error('Error getting Dataset while iterating greedily', { id: this.id });
-            return;
-        }
-
-        while (readItemsCount < dataset.itemCount) {
-            const itemList = await super.listItems({
-                ...listItemOptions,
-                offset: readItemsCount,
-                limit: pageSize,
-            });
-            if (itemList.count === 0) {
-                break;
-            }
+            const itemList = await this.listNextPage(listOptions, readItemsCount);
             readItemsCount += itemList.count;
             for (const item of itemList.items) {
                 yield item;
             }
+
+            const isLimitReached = limit > 0 && readItemsCount >= limit;
+            const isDatasetExhausted = isRunFinished && itemList.count === 0;
+            if (isDatasetExhausted || isLimitReached) break;
+
+            if (!isRunFinished) {
+                await new Promise<void>((resolve) => {
+                    setTimeout(resolve, pollIntervalSecs * 1000);
+                });
+            }
         }
     }
+}
+
+function computeNextPageSize(limit: number, chunkSize: number, readItemsCount: number): number {
+    if (limit > 0 && readItemsCount >= limit) throw new Error('Read items count has reached the limit.');
+    if (limit === 0) return chunkSize;
+    const remainingCount = limit - readItemsCount;
+    if (chunkSize === 0) return remainingCount;
+    return Math.min(chunkSize, remainingCount);
 }

@@ -1,0 +1,34 @@
+name: E2E Tests
+
+on:
+    pull_request:
+
+permissions:
+    # Recommended: sets the permissions given to the GITHUB_TOKEN for this workflow
+    contents: read
+
+jobs:
+    e2e:
+        runs-on: ubuntu-latest
+
+        steps:
+            - name: Checkout code
+              uses: actions/checkout@v7
+              with:
+                  # By default, actions/checkout writes the GITHUB_TOKEN into the local .git/config
+                  # We don't need to perform any Git operation, so we disable persisting credentials
+                  persist-credentials: false
+
+            - name: Setup Node.js
+              uses: actions/setup-node@v7
+              with:
+                  node-version: 24
+                  cache: 'npm'
+
+            - name: Install dependencies
+              run: npm ci
+
+            - name: Run e2e tests
+              run: node e2e-test.js
+              env:
+                  APIFY_TOKEN: ${{ secrets.APIFY_TOKEN }}

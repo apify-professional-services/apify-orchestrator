@@ -1,5 +1,8 @@
 import { ApifyApiError } from 'apify-client';
 
+import { FAIL_STATUSES, OK_STATUSES, TERMINAL_STATUSES } from '../constants.js';
+import { RunFailStatus, RunOkStatus, RunTerminalStatus, RunStatus } from '../types.js';
+
 export const MEMORY_LIMIT_EXCEEDED_ERROR_TYPE = 'actor-memory-limit-exceeded';
 export const CONCURRENT_RUNS_LIMIT_EXCEEDED_ERROR_TYPE = 'concurrent-runs-limit-exceeded';
 
@@ -26,17 +29,14 @@ export function getStartRunErrorType(error: unknown): StartRunErrorType {
     return START_RUN_ERROR_TYPE.OTHER;
 }
 
-// We define both OK and FAIL statuses for better type safety: an unknown status is neither.
-const OK_STATUSES = ['READY', 'RUNNING', 'SUCCEEDED'] as const;
-const FAIL_STATUSES = ['FAILED', 'ABORTING', 'ABORTED', 'TIMING-OUT', 'TIMED-OUT'] as const;
-
-type RunOkStatus = (typeof OK_STATUSES)[number];
-type RunFailStatus = (typeof FAIL_STATUSES)[number];
-
-export function isRunOkStatus(status: string): status is RunOkStatus {
+export function isRunOkStatus(status: RunStatus): status is RunOkStatus {
     return OK_STATUSES.includes(status as RunOkStatus);
 }
 
-export function isRunFailStatus(status: string): status is RunFailStatus {
+export function isRunFailStatus(status: RunStatus): status is RunFailStatus {
     return FAIL_STATUSES.includes(status as RunFailStatus);
+}
+
+export function isRunTerminalStatus(status: RunStatus): status is RunTerminalStatus {
+    return TERMINAL_STATUSES.includes(status);
 }
