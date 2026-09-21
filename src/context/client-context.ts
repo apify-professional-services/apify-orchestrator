@@ -25,6 +25,11 @@ export interface ClientContextOptions {
     clientName: string;
 
     /**
+     * The maximum number of Runs this client may have in progress at the same time. No limit, if undefined.
+     */
+    maxConcurrentRuns?: number;
+
+    /**
      * The Run state this context tracks. It may be persisted, and therefore restored after a resurrection.
      */
     trackedRuns: TrackedRuns;
@@ -44,6 +49,11 @@ export interface ClientContextOptions {
  */
 export interface ClientContext extends OrchestratorContext {
     readonly clientName: string;
+
+    /**
+     * The maximum number of Runs this client may have in progress at the same time. No limit, if undefined.
+     */
+    readonly maxConcurrentRuns?: number;
 
     /**
      * The client this context belongs to.
@@ -107,6 +117,15 @@ export interface ClientContext extends OrchestratorContext {
     trackRunUpdate(requestId: string, run?: ExtendedActorRun): void;
 
     /**
+     * Checks the status of the Runs which are supposedly in progress, but were not observed recently.
+     *
+     * The Orchestrator only notices that a Run finished when it observes its status, which normally happens
+     * while waiting for it: if nobody waits for a Run, a Run which already finished would hold its slot
+     * in the concurrent Runs limit forever, preventing the pending Runs from ever starting.
+     */
+    refreshStaleRuns(): Promise<void>;
+
+    /**
      * Aborts all the Runs currently tracked by this client, without marking them as aborted on a graceful abort.
      */
     abortAllRuns(): Promise<void>;
@@ -135,7 +154,7 @@ export interface ClientContext extends OrchestratorContext {
 
 export function generateClientContext(
     orchestratorContext: OrchestratorContext,
-    { clientName, trackedRuns, createClient }: ClientContextOptions,
+    { clientName, trackedRuns, maxConcurrentRuns, createClient }: ClientContextOptions,
 ): ClientContext {
     // These members are built after the context itself, and exposed through the getters below.
     let runTracker: RunTracker | undefined;
@@ -151,6 +170,7 @@ export function generateClientContext(
     const context: ClientContext = {
         ...orchestratorContext,
         clientName,
+        maxConcurrentRuns,
 
         get client(): ExtApifyClient {
             return requireInitialized(client, 'client');
@@ -174,6 +194,7 @@ export function generateClientContext(
         extendRunClient: (requestId, runId) => runUpdates.extendRunClient(context, requestId, runId),
         buildExtendedRun: (requestId, run) => runUpdates.buildExtendedRun(gracefulAbortTracker, requestId, run),
         trackRunUpdate: (requestId, run) => runUpdates.trackRunUpdate(context, unnamedRequestTracker, requestId, run),
+        refreshStaleRuns: async () => runUpdates.refreshStaleRuns(context),
 
         abortAllRuns: async () => runAborting.abortAllRuns(context),
         abortAllRunsOnGracefulAbort: async () => runAborting.abortAllRunsOnGracefulAbort(context),

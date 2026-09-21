@@ -36,6 +36,18 @@ describe('Apify Orchestrator', () => {
         expect(client.token).toEqual('my-env-token');
     });
 
+    it.each([0, -1])('rejects maxConcurrentRuns of %i', async (maxConcurrentRuns) => {
+        await expect(orchestrator.apifyClient({ maxConcurrentRuns })).rejects.toThrow(
+            'maxConcurrentRuns must be a positive number',
+        );
+    });
+
+    it('creates a client with a valid maxConcurrentRuns', async () => {
+        await expect(
+            orchestrator.apifyClient({ name: 'client-with-max', maxConcurrentRuns: 5 }),
+        ).resolves.toBeDefined();
+    });
+
     it('starts the scheduler upon client creation', async () => {
         const startSpy = vi.spyOn(ActorClient.prototype, 'start');
         const client = await orchestrator.apifyClient({ name: 'client-going-to-start' });

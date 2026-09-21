@@ -301,18 +301,21 @@ describe('ExtApifyClient', () => {
                     runUrl: 'https://console.apify.com/actors/runs/test-id-1',
                     status: 'SUCCEEDED',
                     startedAt: mockDate.toISOString(),
+                    lastUpdatedAt: expect.any(String),
                 },
                 'test-run-2': {
                     runId: 'test-id-2',
                     runUrl: 'https://console.apify.com/actors/runs/test-id-2',
                     status: 'SUCCEEDED',
                     startedAt: mockDate.toISOString(),
+                    lastUpdatedAt: expect.any(String),
                 },
                 'test-run-3': {
                     runId: 'test-id-3',
                     runUrl: 'https://console.apify.com/actors/runs/test-id-3',
                     status: 'SUCCEEDED',
                     startedAt: mockDate.toISOString(),
+                    lastUpdatedAt: expect.any(String),
                 },
             });
 

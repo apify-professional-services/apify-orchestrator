@@ -12,6 +12,18 @@ export const MAIN_LOOP_INTERVAL_MS = 1_000;
 export const MAIN_LOOP_COOLDOWN_MS = 10_000;
 
 /**
+ * @internal how long a Run's observed status is considered up-to-date: after this time, the Run is stale,
+ * and its status is updated again before letting it hold a slot in the concurrent Runs limit.
+ */
+export const RUN_STALENESS_THRESHOLD_MS = 60_000;
+
+/**
+ * @internal the `lastUpdatedAt` assigned to the Runs restored from a previous version of the Orchestrator,
+ * which did not record when a Run was last updated: they are treated as never updated.
+ */
+export const NEVER_UPDATED_AT = new Date(0).toISOString();
+
+/**
  * @internal the default options for the Orchestrator, that can be overriden by the user.
  */
 export const DEFAULT_ORCHESTRATOR_OPTIONS: OrchestratorOptions = {

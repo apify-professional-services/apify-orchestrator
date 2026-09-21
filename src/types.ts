@@ -152,6 +152,13 @@ export type ExtendedClientOptions = ApifyClientOptions & {
      * Used to identify a client, for instance, when storing its Runs in the Key Value Store.
      */
     name?: string;
+
+    /**
+     * The maximum number of Runs that this client may have in progress at the same time.
+     *
+     * @default undefined (no limit)
+     */
+    maxConcurrentRuns?: number;
 };
 
 /**
@@ -632,4 +639,5 @@ export interface RunInfo {
     runUrl: string;
     status: RunStatus;
     startedAt: string;
+    lastUpdatedAt: string;
 }
