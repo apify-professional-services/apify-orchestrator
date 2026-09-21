@@ -85,6 +85,7 @@ const deleteActor = async () => {
 };
 
 let testSucceeded = false;
+let run;
 
 try {
     console.log('\nPushing the actor to Apify Platform.\n');
@@ -98,7 +99,7 @@ try {
 
     console.log('\nActor pushed. Starting the actor run.\n');
 
-    const run = await apifyClient
+    run = await apifyClient
         .actor(actor.id)
         .call({ role: 'e2e-test' }, { forcePermissionLevel: 'FULL_PERMISSIONS' })
         .catch(() => {
@@ -125,6 +126,10 @@ try {
 if (testSucceeded) {
     console.log('\nEnd-to-end test completed successfully.');
 } else {
-    console.error(`\nEnd-to-end tests failed. Run URL: https://console.apify.com/actors/runs/${run.id}.`);
+    if (run) {
+        console.error(`\nEnd-to-end tests failed. Run URL: https://console.apify.com/actors/runs/${run.id}.`);
+    } else {
+        console.error(`\nEnd-to-end tests failed. Error retrieving the run.`);
+    }
     exit(1);
 }
