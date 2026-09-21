@@ -54,7 +54,7 @@ if (existsSync(actorSrcPath)) {
 
 cpSync('src', actorSrcPath, {
     recursive: true,
-    filter: (source) => !source.endsWith('.test.ts') && !source.endsWith('.bench.ts'),
+    filter: (source) => !source.endsWith('.test.ts') && !source.endsWith('.bench.ts') && !source.includes('__unit__'),
 });
 renameSync(`${actorSrcPath}/e2e-test.ts`, `${actorSrcPath}/main.ts`);
 
@@ -62,7 +62,7 @@ console.log('\nInstalling dependencies.\n');
 
 try {
     // Add the dependencies to package.json and package-lock.json, but avoid installing them locally.
-    const dependencies = ['apify-client'];
+    const dependencies = ['apify-client', '@apify/consts'];
     execSync(`npm install ${dependencies.join(' ')} --package-lock-only`, { cwd: actorName, stdio: 'inherit' });
 } catch {
     console.error('\nFailed to install dependencies. Exiting.');
@@ -84,35 +84,45 @@ const deleteActor = async () => {
     }
 };
 
-console.log('\nPushing the actor to Apify Platform.\n');
+let testSucceeded = false;
 
 try {
-    // Since the Actor was created through the client, we need to force the push.
-    execSync(`apify push "${actor.id}" --dir "${actorName}" --force`, { stdio: 'inherit' });
-} catch {
-    console.error('\nFailed to push the actor to Apify Platform. Exiting.');
+    console.log('\nPushing the actor to Apify Platform.\n');
+
+    try {
+        // Since the Actor was created through the client, we need to force the push.
+        execSync(`apify push "${actor.id}" --dir "${actorName}" --force`, { stdio: 'inherit' });
+    } catch {
+        throw new Error('\nFailed to push the actor to Apify Platform. Exiting.');
+    }
+
+    console.log('\nActor pushed. Starting the actor run.\n');
+
+    const run = await apifyClient
+        .actor(actor.id)
+        .call({ role: 'e2e-test' }, { forcePermissionLevel: 'FULL_PERMISSIONS' })
+        .catch(() => {
+            throw new Error('\nFailed to call the actor run.\n');
+        });
+
+    await apifyClient
+        .dataset(run.defaultDatasetId)
+        .listItems()
+        .then(({ items }) => {
+            console.log(`\nTest results: ${JSON.stringify(items, null, 2)}\n`);
+        })
+        .catch(() => {
+            throw new Error('\nFailed to retrieve test results.\n');
+        });
+
+    testSucceeded = run.status === 'SUCCEEDED';
+} catch (error) {
+    console.error(`\nAn error occurred during the end-to-end test: ${error.message}\n`);
+} finally {
     await deleteActor();
-    exit(1);
 }
 
-console.log('\nActor pushed. Starting the actor run.\n');
-
-const run = await apifyClient.actor(actor.id).call({ role: 'e2e-test' }, { forcePermissionLevel: 'FULL_PERMISSIONS' });
-
-await apifyClient
-    .dataset(run.defaultDatasetId)
-    .listItems()
-    .then(({ items }) => {
-        console.log(`\nTest results: ${JSON.stringify(items, null, 2)}\n`);
-    })
-    .catch(() => {
-        console.error('\nFailed to retrieve test results.\n');
-        return null;
-    });
-
-await deleteActor();
-
-if (run.status === 'SUCCEEDED') {
+if (testSucceeded) {
     console.log('\nEnd-to-end test completed successfully.');
 } else {
     console.error(`\nEnd-to-end tests failed. Run URL: https://console.apify.com/actors/runs/${run.id}.`);

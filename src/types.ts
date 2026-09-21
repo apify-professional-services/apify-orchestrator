@@ -370,7 +370,7 @@ export interface ExtendedTaskClient extends TaskClient {
      * Enqueues one or more requests for new Runs, and return immediately.
      *
      * @param runRequests the requests
-     * @returns the future names of the Runs
+     * @returns the future request IDs of the Runs
      */
     enqueue: (...runRequests: ActorRunRequest[]) => string[];
 
@@ -384,7 +384,7 @@ export interface ExtendedTaskClient extends TaskClient {
      * @param inputGenerator the function used to generate the input batches
      * @param overrideSplitRules the rules for splitting
      * @param options the options for starting the Runs
-     * @returns the future names of the Runs
+     * @returns the future request IDs of the Runs
      */
     enqueueBatch: <T>(
         namePrefix: string,

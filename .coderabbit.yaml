@@ -1,7 +1,7 @@
 # yaml-language-server: $schema=https://storage.googleapis.com/coderabbit_public_assets/schema.v2.json
 # CodeRabbit config — tuned for SHORT, substantive reviews.
-# Style/formatting is enforced by CI (ESLint + Prettier) and the pre-commit hook,
-# so CodeRabbit focuses on bugs, security, design, readability, and comment sanity.
+# Style/formatting is enforced by CI and the pre-commit hook, so CodeRabbit focuses
+# on bugs, security, design, readability, and comment sanity.
 language: 'en-US'
 
 # Global review voice (max 250 chars).
@@ -11,9 +11,8 @@ reviews:
     profile: 'chill' # fewer, higher-signal comments (vs. "assertive" = more nitpicks)
 
     # --- Merge gating -------------------------------------------------------
-    # `review_status` only controls the review-status message posted in the
-    # walkthrough. The GitHub commit status check is a SEPARATE setting
-    # (`commit_status`), enabled by default and not overridden here.
+    # `review_progress` defaults to true and is not overridden here, so
+    # `commit_status` has no effect. It applies only when `review_progress` is disabled.
     # Note: `request_changes_workflow: false` alone does NOT prevent merge
     # blocking — if CodeRabbit's check is required by branch protection
     # (for `main` or `dev/.*`), merges are still gated on it.

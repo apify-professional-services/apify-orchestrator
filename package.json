@@ -17,7 +17,7 @@
         "lint": "oxlint",
         "lint:fix": "oxlint --fix",
         "test": "vitest run",
-        "bench:hash": "vitest --run bench hash",
+        "bench:hash": "vitest bench --run hash",
         "coverage": "vitest run --coverage",
         "prepare": "husky"
     },
@@ -43,6 +43,7 @@
         "@types/node": "^26.5.1",
         "@vitest/coverage-v8": "^5.0.0",
         "husky": "^9.1.7",
+        "lint-staged": "^17.5.1",
         "oxfmt": "^0.68.0",
         "oxlint": "^1.83.0",
         "tslib": "^2.8.1",

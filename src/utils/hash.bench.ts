@@ -1,5 +1,5 @@
 import { createHash } from 'node:crypto';
-import { afterAll, bench, describe } from 'vitest';
+import { afterAll, test } from 'vitest';
 
 // Shared sink that every benchmark callback writes its result into. Without this, a pure function
 // call whose return value is discarded is a candidate for dead-code elimination by the JIT, which
@@ -32,28 +32,28 @@ const largePayload = JSON.stringify({
     customData: { nested: { deeply: { value: 'x'.repeat(500) } } },
 });
 
-describe('hash algorithms - small payload (~80 bytes)', () => {
-    bench('md5 (128-bit)', () => {
+test('hash algorithms - small payload (~80 bytes)', async ({ bench }) => {
+    await bench('md5 (128-bit)', () => {
         sink = md5(smallPayload);
-    });
-    bench('sha1 (160-bit)', () => {
+    }).run();
+    await bench('sha1 (160-bit)', () => {
         sink = sha1(smallPayload);
-    });
-    bench('sha256 (256-bit)', () => {
+    }).run();
+    await bench('sha256 (256-bit)', () => {
         sink = sha256(smallPayload);
-    });
+    }).run();
 });
 
-describe('hash algorithms - large payload (~10 KB)', () => {
-    bench('md5 (128-bit)', () => {
+test('hash algorithms - large payload (~10 KB)', async ({ bench }) => {
+    await bench('md5 (128-bit)', () => {
         sink = md5(largePayload);
-    });
-    bench('sha1 (160-bit)', () => {
+    }).run();
+    await bench('sha1 (160-bit)', () => {
         sink = sha1(largePayload);
-    });
-    bench('sha256 (256-bit)', () => {
+    }).run();
+    await bench('sha256 (256-bit)', () => {
         sink = sha256(largePayload);
-    });
+    }).run();
 });
 
 afterAll(() => {
